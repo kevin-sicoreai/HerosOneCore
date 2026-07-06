@@ -96,3 +96,7 @@ data_service.db
 dev.db
 *.sqlite3
 _dataplane/
+
+# Pipeline service artifacts
+pipeline*.db
+_pipelines/
