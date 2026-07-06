@@ -93,6 +93,7 @@ desktop.ini
 # AskDelphi Python service artifacts
 *.egg-info/
 data_service.db
+assist_service.db
 dev.db
 *.sqlite3
 _dataplane/

@@ -127,3 +127,43 @@
     @apply font-sans;
     }
 }
+/* Markdown answer rendering in the AIP assist conversation */
+.markdown-answer > :first-child { margin-top: 0; }
+.markdown-answer > :last-child { margin-bottom: 0; }
+.markdown-answer p { margin: 0.5rem 0; line-height: 1.65; }
+.markdown-answer h1, .markdown-answer h2, .markdown-answer h3, .markdown-answer h4 {
+  margin: 0.9rem 0 0.4rem; font-weight: 600;
+}
+.markdown-answer h1 { font-size: 1.05rem; }
+.markdown-answer h2 { font-size: 1rem; }
+.markdown-answer h3, .markdown-answer h4 { font-size: 0.925rem; }
+.markdown-answer ul, .markdown-answer ol { margin: 0.5rem 0; padding-left: 1.25rem; }
+.markdown-answer ul { list-style: disc; }
+.markdown-answer ol { list-style: decimal; }
+.markdown-answer li { margin: 0.2rem 0; }
+.markdown-answer code {
+  background: color-mix(in oklab, var(--muted) 70%, transparent);
+  border-radius: 0.25rem; padding: 0.1rem 0.35rem; font-size: 0.85em;
+}
+.markdown-answer pre {
+  background: color-mix(in oklab, var(--muted) 60%, transparent);
+  border: 1px solid var(--border); border-radius: 0.5rem;
+  padding: 0.75rem; margin: 0.5rem 0; overflow-x: auto;
+}
+.markdown-answer pre code { background: none; padding: 0; }
+.markdown-answer table {
+  width: 100%; margin: 0.5rem 0; border-collapse: collapse; font-size: 0.875rem;
+  display: block; overflow-x: auto;
+}
+.markdown-answer th, .markdown-answer td {
+  border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left;
+}
+.markdown-answer th {
+  background: color-mix(in oklab, var(--muted) 60%, transparent);
+  font-weight: 500; color: var(--muted-foreground);
+}
+.markdown-answer blockquote {
+  border-left: 2px solid var(--border); padding-left: 0.75rem; margin: 0.5rem 0;
+  color: var(--muted-foreground);
+}
+.markdown-answer hr { border-color: var(--border); margin: 0.75rem 0; }
