@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   BotIcon,
   CpuIcon,
@@ -61,10 +61,11 @@ export default function AssistPage() {
 
 function AssistInner() {
   const params = useSearchParams()
+  const router = useRouter()
   const [sessions, setSessions] = React.useState<ChatSession[]>([])
   const [activeId, setActiveId] = React.useState<string | null>(null)
   const [messages, setMessages] = React.useState<UIMessage[]>([])
-  const [input, setInput] = React.useState(params.get("q") ?? "")
+  const [input, setInput] = React.useState("")
   const [modelName, setModelName] = React.useState("")
   const [offline, setOffline] = React.useState(false)
   const [streaming, setStreaming] = React.useState(false)
@@ -78,6 +79,19 @@ function AssistInner() {
   React.useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [messages])
+
+  // Global search bar entry: /assist?q=... auto-sends the question, then the
+  // query param is stripped so a refresh doesn't resend it.
+  const autoSentRef = React.useRef<string | null>(null)
+  const q = params.get("q")
+  React.useEffect(() => {
+    if (q && autoSentRef.current !== q) {
+      autoSentRef.current = q
+      send(q)
+      router.replace("/assist")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q])
 
   async function openSession(id: string) {
     setActiveId(id)

@@ -45,6 +45,7 @@ export function TopBar() {
   function submitSearch(e: React.FormEvent) {
     e.preventDefault()
     router.push(query.trim() ? `/assist?q=${encodeURIComponent(query.trim())}` : "/assist")
+    setQuery("")
   }
 
   return (
