@@ -1,9 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { DownloadIcon, SearchIcon, StoreIcon } from "lucide-react"
+import Link from "next/link"
+import { CheckIcon, DownloadIcon, SearchIcon, StoreIcon, WifiOffIcon } from "lucide-react"
 
-import { MARKET_APPS } from "@/lib/mock"
+import { formatInstalls, marketplaceApi, type MarketApp } from "@/lib/marketplace-api"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,11 +14,31 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 export default function MarketplacePage() {
   const [tab, setTab] = React.useState("all")
   const [q, setQ] = React.useState("")
+  const [apps, setApps] = React.useState<MarketApp[]>([])
+  const [offline, setOffline] = React.useState(false)
+  const [deploying, setDeploying] = React.useState<string | null>(null)
 
-  const apps = MARKET_APPS.filter(
-    (a) =>
-      (tab === "all" || a.tag === tab) &&
-      (a.name.includes(q) || a.desc.includes(q))
+  React.useEffect(() => {
+    marketplaceApi
+      .apps()
+      .then(setApps)
+      .catch(() => setOffline(true))
+  }, [])
+
+  async function deploy(id: string) {
+    setDeploying(id)
+    try {
+      const updated = await marketplaceApi.deploy(id)
+      setApps((prev) => prev.map((a) => (a.id === id ? updated : a)))
+    } catch {
+      // service down mid-session; the offline badge covers the initial case
+    } finally {
+      setDeploying(null)
+    }
+  }
+
+  const visible = apps.filter(
+    (a) => (tab === "all" || a.tag === tab) && (a.name.includes(q) || a.desc.includes(q))
   )
 
   return (
@@ -26,6 +47,13 @@ export default function MarketplacePage() {
         title="应用市场"
         desc="预置 AI 应用一键部署，或使用本组织自建应用"
         icon={<StoreIcon />}
+        actions={
+          offline ? (
+            <Badge variant="warning">
+              <WifiOffIcon /> 市场服务未启动
+            </Badge>
+          ) : undefined
+        }
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -48,7 +76,7 @@ export default function MarketplacePage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {apps.map((a) => (
+        {visible.map((a) => (
           <Card key={a.id} className="justify-between transition-colors hover:border-emerald-500/40">
             <CardHeader>
               <div className="mb-1 flex items-center justify-between">
@@ -65,17 +93,29 @@ export default function MarketplacePage() {
               <p className="text-sm text-muted-foreground">{a.desc}</p>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
-                  {a.category} · {a.installs}
+                  {a.category} · {formatInstalls(a)}
                 </span>
-                <Button size="sm" variant={a.tag === "prebuilt" ? "default" : "outline"}>
-                  {a.tag === "prebuilt" ? (
-                    <>
-                      <DownloadIcon /> 部署
-                    </>
+                {a.tag === "prebuilt" ? (
+                  a.deployed ? (
+                    <Button size="sm" variant="outline" onClick={() => deploy(a.id)} disabled={deploying === a.id}>
+                      <CheckIcon className="text-emerald-500" /> 已部署
+                    </Button>
                   ) : (
-                    "打开"
-                  )}
-                </Button>
+                    <Button size="sm" onClick={() => deploy(a.id)} disabled={deploying === a.id}>
+                      <DownloadIcon /> 部署
+                    </Button>
+                  )
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!a.has_definition}
+                    nativeButton={false}
+                    render={<Link href={`/marketplace/${a.id}`} />}
+                  >
+                    打开
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

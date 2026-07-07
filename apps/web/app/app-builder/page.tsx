@@ -1,29 +1,108 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core"
 import {
   BlocksIcon,
-  ChartColumnIcon,
-  GaugeIcon,
-  SquareMousePointerIcon,
-  TableIcon,
-  TypeIcon,
+  CheckIcon,
+  CloudOffIcon,
+  EyeIcon,
+  Loader2Icon,
+  PencilIcon,
+  RotateCcwIcon,
+  StoreIcon,
 } from "lucide-react"
 
+import { useAppDraft } from "@/lib/app-builder/store"
+import type { WidgetType } from "@/lib/app-builder/types"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Canvas } from "@/components/app-builder/canvas"
+import { ConfigPanel } from "@/components/app-builder/config-panel"
+import { Palette } from "@/components/app-builder/palette"
+import { DefinitionView } from "@/components/app-builder/widget-view"
 
-const WIDGETS = [
-  { key: "heading", label: "标题", icon: TypeIcon },
-  { key: "metric", label: "指标卡", icon: GaugeIcon },
-  { key: "chart", label: "图表", icon: ChartColumnIcon },
-  { key: "table", label: "对象表", icon: TableIcon },
-  { key: "button", label: "操作按钮", icon: SquareMousePointerIcon },
-]
+type DragData = { kind: "palette" | "section" | "widget"; type?: WidgetType; label?: string }
 
 export default function AppBuilderPage() {
-  const [selected, setSelected] = React.useState("metric")
+  const store = useAppDraft()
+  const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [preview, setPreview] = React.useState(false)
+  const [publishing, setPublishing] = React.useState(false)
+  const [published, setPublished] = React.useState(false)
+  const [notice, setNotice] = React.useState<string | null>(null)
+  const [active, setActive] = React.useState<DragData | null>(null)
+  const [overSectionId, setOverSectionId] = React.useState<string | null>(null)
+
+  // Small activation distance so plain clicks still select widgets.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+
+  const selectedWidget =
+    store.draft.sections.flatMap((s) => s.widgets).find((w) => w.id === selectedId) ?? null
+
+  function handleDragStart(e: DragStartEvent) {
+    setActive((e.active.data.current as DragData) ?? null)
+  }
+
+  // Highlight the whole section while hovering anywhere inside it (its body
+  // or one of its widgets) so "drop here joins this row" is discoverable.
+  function handleDragOver(e: DragOverEvent) {
+    const o = e.over?.data.current as { sectionId?: string } | undefined
+    setOverSectionId(o?.sectionId ?? null)
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    setActive(null)
+    setOverSectionId(null)
+    const a = e.active.data.current as DragData | undefined
+    const over = e.over
+    if (!a || !over) return
+    const o = over.data.current as
+      | { kind: "gap"; index: number }
+      | { kind: "section-body"; sectionId: string }
+      | { kind: "section" }
+      | { kind: "widget"; sectionId: string }
+      | undefined
+
+    if (a.kind === "palette" && a.type) {
+      if (o?.kind === "gap") store.addWidgetToNewSection(a.type, o.index)
+      else if (o?.kind === "widget") store.addWidgetToSection(a.type, o.sectionId)
+      else if (o?.kind === "section-body") store.addWidgetToSection(a.type, o.sectionId)
+    } else if (a.kind === "section") {
+      if (o?.kind === "section") store.moveSection(String(e.active.id), String(over.id))
+    } else if (a.kind === "widget") {
+      if (o?.kind === "gap") store.moveWidget(String(e.active.id), { newSectionIndex: o.index })
+      else if (o?.kind === "widget" && over.id !== e.active.id)
+        store.moveWidget(String(e.active.id), { widgetId: String(over.id) })
+      else if (o?.kind === "section-body")
+        store.moveWidget(String(e.active.id), { sectionId: o.sectionId })
+    }
+  }
+
+  async function handlePublish() {
+    setPublishing(true)
+    setPublished(false)
+    try {
+      await store.publish()
+      setPublished(true)
+    } catch {
+      setNotice("发布失败：构建器服务不可用")
+      window.setTimeout(() => setNotice(null), 3000)
+    } finally {
+      setPublishing(false)
+    }
+  }
 
   return (
     <PageContainer className="h-full">
@@ -32,104 +111,94 @@ export default function AppBuilderPage() {
         desc="低代码搭建业务应用 —— 页面 · 区块 · 组件，绑定本体对象"
         icon={<BlocksIcon />}
         actions={
-          <>
-            <Button variant="outline" size="sm">预览</Button>
-            <Button size="sm">发布</Button>
-          </>
+          <div className="flex items-center gap-2">
+            {notice && <Badge variant="warning">{notice}</Badge>}
+            {store.saveState === "offline" && (
+              <Badge variant="warning">
+                <CloudOffIcon /> 服务未启动 · 修改不保存
+              </Badge>
+            )}
+            {store.saveState === "saving" && (
+              <span className="text-xs text-muted-foreground">保存中…</span>
+            )}
+            {store.saveState === "saved" && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <CheckIcon className="size-3.5 text-emerald-500" /> 已保存
+              </span>
+            )}
+            {published && (
+              <Badge variant="brand">
+                <StoreIcon />
+                <Link href="/marketplace" className="hover:underline">
+                  已发布 · 去市场查看
+                </Link>
+              </Badge>
+            )}
+            <Button variant="ghost" size="sm" onClick={store.resetDraft}>
+              <RotateCcwIcon /> 重置
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setPreview((v) => !v)}>
+              {preview ? (
+                <>
+                  <PencilIcon /> 继续编辑
+                </>
+              ) : (
+                <>
+                  <EyeIcon /> 预览
+                </>
+              )}
+            </Button>
+            <Button size="sm" onClick={handlePublish} disabled={publishing || store.saveState === "offline"}>
+              {publishing ? <Loader2Icon className="animate-spin" /> : null} 发布
+            </Button>
+          </div>
         }
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[180px_1fr_260px] gap-4">
-        {/* Widget palette */}
-        <div className="rounded-xl border border-border bg-card p-3">
-          <div className="mb-2 text-xs font-medium text-muted-foreground">组件</div>
-          <div className="space-y-1.5">
-            {WIDGETS.map((w) => (
-              <div
-                key={w.key}
-                className="flex cursor-grab items-center gap-2 rounded-lg border border-border px-2.5 py-2 text-sm transition-colors hover:border-emerald-500/40 active:cursor-grabbing"
-              >
-                <w.icon className="size-4 text-muted-foreground" />
-                {w.label}
-              </div>
-            ))}
-          </div>
+      {preview ? (
+        <div className="min-h-[440px] overflow-auto rounded-xl border border-border bg-background p-5">
+          <DefinitionView draft={store.draft} />
         </div>
-
-        {/* Canvas */}
-        <div className="min-h-[440px] overflow-auto rounded-xl border border-border bg-muted/20 p-5">
-          <div className="mx-auto max-w-2xl space-y-3">
-            {/* module header */}
-            <div className="rounded-lg border border-border bg-card px-4 py-3">
-              <div className="text-base font-semibold">运营指挥台</div>
-              <div className="text-xs text-muted-foreground">模块 Header · 跨页面持久</div>
-            </div>
-            {/* metric row */}
-            <div
-              onClick={() => setSelected("metric")}
-              className={`grid grid-cols-3 gap-3 rounded-lg border-2 border-dashed p-3 ${
-                selected === "metric" ? "border-emerald-500" : "border-border"
-              }`}
-            >
-              {["订单履约率 94.2%", "设备可用率 98.1%", "在途订单 12,904"].map((m) => (
-                <div key={m} className="rounded-lg border border-border bg-card p-3 text-sm">
-                  <div className="text-xs text-muted-foreground">{m.split(" ")[0]}</div>
-                  <div className="text-lg font-semibold">{m.split(" ")[1]}</div>
-                </div>
-              ))}
-            </div>
-            {/* chart + table section */}
-            <div className="grid grid-cols-2 gap-3">
-              <div
-                onClick={() => setSelected("chart")}
-                className={`flex h-40 items-end gap-1.5 rounded-lg border-2 border-dashed bg-card p-3 ${
-                  selected === "chart" ? "border-emerald-500" : "border-border"
-                }`}
-              >
-                {[40, 65, 52, 78, 60, 88, 72].map((h, i) => (
-                  <div key={i} className="flex-1 rounded-t bg-emerald-500/70" style={{ height: `${h}%` }} />
-                ))}
-              </div>
-              <div
-                onClick={() => setSelected("table")}
-                className={`h-40 rounded-lg border-2 border-dashed bg-card p-3 ${
-                  selected === "table" ? "border-emerald-500" : "border-border"
-                }`}
-              >
-                <div className="space-y-1.5">
-                  {["DV-10231", "DV-10240", "DV-10255"].map((r) => (
-                    <div key={r} className="flex justify-between border-b border-border/60 py-1 text-xs">
-                      <span className="font-mono text-emerald-500">{r}</span>
-                      <span className="text-muted-foreground">告警</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+      ) : (
+        <DndContext
+          id="app-builder-dnd"
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => {
+            setActive(null)
+            setOverSectionId(null)
+          }}
+        >
+          <div className="grid min-h-0 flex-1 grid-cols-[180px_1fr_260px] gap-4">
+            <Palette />
+            <Canvas
+              draft={store.draft}
+              dragActive={active != null}
+              overSectionId={overSectionId}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onRemoveWidget={(id) => {
+                store.removeWidget(id)
+                if (selectedId === id) setSelectedId(null)
+              }}
+              onRemoveSection={store.removeSection}
+            />
+            <ConfigPanel widget={selectedWidget} onChange={store.updateConfig} />
           </div>
-        </div>
-
-        {/* Config panel */}
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="mb-2 text-xs font-medium text-muted-foreground">组件配置</div>
-          <Badge variant="brand" className="mb-3">{WIDGETS.find((w) => w.key === selected)?.label ?? "组件"}</Badge>
-          <div className="space-y-2 text-sm">
-            <Field label="绑定对象" value="设备 Device" />
-            <Field label="数据源" value="pipeline_maintenance" />
-            <Field label="刷新" value="实时" />
-            <Field label="宽度" value="1/3 列" />
-          </div>
-        </div>
-      </div>
+          {/* dropAnimation disabled: the rAF-driven animation never finishes in
+              throttled/background tabs, leaving a stuck overlay that blocks
+              the next drag. */}
+          <DragOverlay dropAnimation={null}>
+            {active && (
+              <div className="rounded-lg border border-emerald-500/60 bg-card px-3 py-2 text-sm shadow-lg">
+                {active.label ?? "组件"}
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
+      )}
     </PageContainer>
-  )
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="mb-1 text-xs text-muted-foreground">{label}</div>
-      <div className="rounded-md border border-border px-2.5 py-1.5 text-sm">{value}</div>
-    </div>
   )
 }

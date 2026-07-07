@@ -94,6 +94,8 @@ desktop.ini
 *.egg-info/
 data_service.db
 assist_service.db
+marketplace_service.db
+app_builder_service.db
 dev.db
 *.sqlite3
 _dataplane/
