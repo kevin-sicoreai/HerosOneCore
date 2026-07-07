@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { CheckIcon, DownloadIcon, SearchIcon, StoreIcon, WifiOffIcon } from "lucide-react"
+import { CheckIcon, DownloadIcon, SearchIcon, StoreIcon, WifiOffIcon, XIcon } from "lucide-react"
 
 import { formatInstalls, marketplaceApi, type MarketApp } from "@/lib/marketplace-api"
 import { PageContainer, PageHeading } from "@/components/page-container"
@@ -25,11 +25,13 @@ export default function MarketplacePage() {
       .catch(() => setOffline(true))
   }, [])
 
-  async function deploy(id: string) {
-    setDeploying(id)
+  async function toggleDeploy(app: MarketApp) {
+    setDeploying(app.id)
     try {
-      const updated = await marketplaceApi.deploy(id)
-      setApps((prev) => prev.map((a) => (a.id === id ? updated : a)))
+      const updated = app.deployed
+        ? await marketplaceApi.undeploy(app.id)
+        : await marketplaceApi.deploy(app.id)
+      setApps((prev) => prev.map((a) => (a.id === app.id ? updated : a)))
     } catch {
       // service down mid-session; the offline badge covers the initial case
     } finally {
@@ -95,17 +97,7 @@ export default function MarketplacePage() {
                 <span className="text-xs text-muted-foreground">
                   {a.category} · {formatInstalls(a)}
                 </span>
-                {a.tag === "prebuilt" ? (
-                  a.deployed ? (
-                    <Button size="sm" variant="outline" onClick={() => deploy(a.id)} disabled={deploying === a.id}>
-                      <CheckIcon className="text-emerald-500" /> 已部署
-                    </Button>
-                  ) : (
-                    <Button size="sm" onClick={() => deploy(a.id)} disabled={deploying === a.id}>
-                      <DownloadIcon /> 部署
-                    </Button>
-                  )
-                ) : (
+                <div className="flex items-center gap-1.5">
                   <Button
                     size="sm"
                     variant="outline"
@@ -113,9 +105,30 @@ export default function MarketplacePage() {
                     nativeButton={false}
                     render={<Link href={`/marketplace/${a.id}`} />}
                   >
-                    打开
+                    预览
                   </Button>
-                )}
+                  {a.deployed ? (
+                    // Hover flips the deployed state into an undeploy action.
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="group/deployed"
+                      onClick={() => toggleDeploy(a)}
+                      disabled={deploying === a.id}
+                    >
+                      <span className="flex items-center gap-1 group-hover/deployed:hidden">
+                        <CheckIcon className="text-emerald-500" /> 已部署
+                      </span>
+                      <span className="hidden items-center gap-1 text-red-500 group-hover/deployed:flex">
+                        <XIcon /> 取消部署
+                      </span>
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => toggleDeploy(a)} disabled={deploying === a.id}>
+                      <DownloadIcon /> 部署
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -36,6 +36,7 @@ export const marketplaceApi = {
   apps: () => req<MarketApp[]>("/apps"),
   app: (id: string) => req<MarketAppDetail>(`/apps/${id}`),
   deploy: (id: string) => req<MarketApp>(`/apps/${id}/deploy`, { method: "POST" }),
+  undeploy: (id: string) => req<MarketApp>(`/apps/${id}/undeploy`, { method: "POST" }),
 }
 
 export function formatInstalls(app: Pick<MarketApp, "tag" | "installs">): string {

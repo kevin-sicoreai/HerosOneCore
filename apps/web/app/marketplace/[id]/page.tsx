@@ -33,7 +33,9 @@ export default function MarketAppRunPage() {
         icon={<BlocksIcon />}
         actions={
           <div className="flex items-center gap-2">
-            <Badge variant="brand">自建应用 · 只读运行</Badge>
+            <Badge variant="brand">
+              {app ? (app.tag === "prebuilt" ? "预置应用" : "自建应用") : "应用"} · 预览
+            </Badge>
             <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/marketplace" />}>
               <ArrowLeftIcon /> 返回市场
             </Button>

@@ -39,3 +39,8 @@ def publish_app(payload: PublishRequest, db: Session = Depends(get_db)) -> Marke
 @router.post("/apps/{app_id}/deploy", response_model=MarketAppOut)
 def deploy_app(app_id: str, db: Session = Depends(get_db)) -> MarketAppOut:
     return _to_out(market_service.deploy(db, app_id))
+
+
+@router.post("/apps/{app_id}/undeploy", response_model=MarketAppOut)
+def undeploy_app(app_id: str, db: Session = Depends(get_db)) -> MarketAppOut:
+    return _to_out(market_service.undeploy(db, app_id))

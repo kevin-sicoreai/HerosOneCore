@@ -32,6 +32,17 @@ def deploy(db: Session, app_id: str) -> MarketApp:
     return app
 
 
+def undeploy(db: Session, app_id: str) -> MarketApp:
+    app = get_or_404(db, app_id)
+    if app.deployed:
+        app.installs = max(0, app.installs - 1)
+        app.deployed = False
+        app.updated_at = utcnow_iso()
+        db.commit()
+        db.refresh(app)
+    return app
+
+
 def publish(db: Session, payload: PublishRequest) -> MarketApp:
     """Create or update the catalog entry for a builder app (upsert on source)."""
     app = db.scalar(select(MarketApp).where(MarketApp.source_app_id == payload.source_app_id))
@@ -75,14 +86,19 @@ def _demo_definition(title: str) -> dict:
     }
 
 
-# Matches the frontend prototype's catalog so the page looks familiar on day one.
+# Matches the frontend prototype's catalog so the page looks familiar on day
+# one. Every entry carries a demo definition so "open" works for all of them.
 SEED_APPS: list[dict] = [
-    {"name": "预测性维护", "desc": "基于传感器数据预测设备故障", "tag": "prebuilt", "category": "运营", "installs": 1200},
-    {"name": "供应链风险雷达", "desc": "多级供应商风险实时监控", "tag": "prebuilt", "category": "供应链", "installs": 860},
-    {"name": "反欺诈调查台", "desc": "实体关联 + 资金流图谱", "tag": "prebuilt", "category": "调查", "installs": 540},
+    {"name": "预测性维护", "desc": "基于传感器数据预测设备故障", "tag": "prebuilt", "category": "运营", "installs": 1200,
+     "definition": _demo_definition("预测性维护")},
+    {"name": "供应链风险雷达", "desc": "多级供应商风险实时监控", "tag": "prebuilt", "category": "供应链", "installs": 860,
+     "definition": _demo_definition("供应链风险雷达")},
+    {"name": "反欺诈调查台", "desc": "实体关联 + 资金流图谱", "tag": "prebuilt", "category": "调查", "installs": 540,
+     "definition": _demo_definition("反欺诈调查台")},
     {"name": "运营指挥台", "desc": "本组织自建的实时运营看板", "tag": "custom", "category": "自建", "installs": 0,
      "definition": _demo_definition("运营指挥台")},
-    {"name": "客户 360", "desc": "跨系统客户全景视图", "tag": "prebuilt", "category": "营销", "installs": 2100},
+    {"name": "客户 360", "desc": "跨系统客户全景视图", "tag": "prebuilt", "category": "营销", "installs": 2100,
+     "definition": _demo_definition("客户 360")},
     {"name": "调查看板", "desc": "案件专用关系与时间线视图", "tag": "custom", "category": "自建", "installs": 0,
      "definition": _demo_definition("调查看板")},
 ]
