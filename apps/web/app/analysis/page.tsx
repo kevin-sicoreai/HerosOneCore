@@ -3,26 +3,34 @@
 import * as React from "react"
 import {
   CalendarClockIcon,
+  FilterIcon,
   MapIcon,
+  PlusIcon,
   RadarIcon,
   TableIcon,
   WaypointsIcon,
+  WifiOffIcon,
+  XIcon,
 } from "lucide-react"
 
 import {
-  DEVICE_ROWS,
-  GRAPH_EDGES,
-  GRAPH_NODES,
-  TIMELINE,
-  type GraphNode,
-} from "@/lib/mock"
-import { useWorkspace } from "@/components/workspace-context"
+  analysisApi,
+  type AnalysisTable,
+  type AnalyzeResult,
+  type FilterOp,
+  type FilterSpec,
+  type MetricAgg,
+  type MetricSpec,
+} from "@/lib/analysis-api"
+import { GRAPH_EDGES, GRAPH_NODES, TIMELINE, type GraphNode } from "@/lib/mock"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 
 type View = "graph" | "timeline" | "map" | "table"
 
+// Same order as the original prototype; 表格 hosts the aggregation workbench.
 const VIEWS: { key: View; label: string; icon: React.ElementType }[] = [
   { key: "graph", label: "关系图谱", icon: WaypointsIcon },
   { key: "timeline", label: "时间轴", icon: CalendarClockIcon },
@@ -30,64 +38,98 @@ const VIEWS: { key: View; label: string; icon: React.ElementType }[] = [
   { key: "table", label: "表格", icon: TableIcon },
 ]
 
-const NODE_COLOR: Record<GraphNode["type"], string> = {
-  person: "#10b981",
-  org: "#0ea5e9",
-  account: "#a855f7",
-  device: "#f59e0b",
-  event: "#ef4444",
-}
-const NODE_LABEL: Record<GraphNode["type"], string> = {
-  person: "人员",
-  org: "组织",
-  account: "账户",
-  device: "设备",
-  event: "事件",
+const AGG_OPTIONS: { value: MetricAgg; label: string }[] = [
+  { value: "avg", label: "平均" },
+  { value: "sum", label: "合计" },
+  { value: "count", label: "计数" },
+  { value: "max", label: "最大" },
+  { value: "min", label: "最小" },
+]
+
+const OP_OPTIONS: { value: FilterOp; label: string }[] = [
+  { value: "eq", label: "=" },
+  { value: "neq", label: "≠" },
+  { value: "gt", label: ">" },
+  { value: "lt", label: "<" },
+  { value: "contains", label: "包含" },
+]
+
+const SELECT_CLASS =
+  "w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-sm outline-none focus:border-emerald-500/60"
+
+function formatValue(v: number | string): string {
+  if (typeof v !== "number") return String(v)
+  return v >= 1000 ? v.toLocaleString() : String(v)
 }
 
 export default function AnalysisPage() {
-  const { workspace } = useWorkspace()
-  const isGotham = workspace.kind === "gotham"
-  const [mode, setMode] = React.useState<"foundry" | "gotham">(workspace.kind)
-  const [view, setView] = React.useState<View>(isGotham ? "graph" : "table")
+  const [tables, setTables] = React.useState<AnalysisTable[]>([])
+  const [offline, setOffline] = React.useState(false)
+  const [tableName, setTableName] = React.useState<string>("")
+  const [groupBy, setGroupBy] = React.useState<string>("")
+  const [metrics, setMetrics] = React.useState<MetricSpec[]>([])
+  const [filters, setFilters] = React.useState<FilterSpec[]>([])
+  const [result, setResult] = React.useState<AnalyzeResult | null>(null)
+  const [view, setView] = React.useState<View>("table")
 
-  // Sync default when switching workspace
+  const table = tables.find((t) => t.name === tableName) ?? null
+  const dimensions = table?.columns.filter((c) => c.kind === "dimension" && c.name !== "id") ?? []
+  const measures = table?.columns.filter((c) => c.kind === "measure") ?? []
+  const isAgg = view === "table"
+
+  // Load the catalog, select the first table with sensible defaults.
   React.useEffect(() => {
-    setMode(workspace.kind)
-    setView(workspace.kind === "gotham" ? "graph" : "table")
-  }, [workspace.kind])
+    analysisApi
+      .tables()
+      .then((ts) => {
+        setTables(ts)
+        if (ts.length > 0) selectTable(ts[0])
+      })
+      .catch(() => setOffline(true))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function selectTable(t: AnalysisTable) {
+    const dims = t.columns.filter((c) => c.kind === "dimension" && c.name !== "id")
+    const meas = t.columns.filter((c) => c.kind === "measure")
+    setTableName(t.name)
+    setGroupBy(dims[0]?.name ?? "")
+    setMetrics(meas[0] ? [{ field: meas[0].name, agg: "avg" }] : [])
+    setFilters([])
+    setResult(null)
+  }
+
+  // Auto-run on any config change (debounced).
+  React.useEffect(() => {
+    if (!tableName || metrics.length === 0) return
+    const timer = window.setTimeout(() => {
+      analysisApi
+        .analyze({
+          table: tableName,
+          group_by: groupBy || null,
+          metrics,
+          filters: filters.filter((f) => String(f.value).trim() !== ""),
+        })
+        .then(setResult)
+        .catch(() => setOffline(true))
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [tableName, groupBy, metrics, filters])
 
   return (
     <PageContainer className="h-full">
       <PageHeading
         title="分析工作台"
-        desc="同一套本体，两种打开方式：企业分析与调查分析"
+        desc="同一套本体 · 聚合、图谱、时间轴与地理视图"
         icon={<RadarIcon />}
         actions={
-          <div className="inline-flex rounded-lg border border-border p-0.5 text-sm">
-            <button
-              onClick={() => {
-                setMode("foundry")
-                setView("table")
-              }}
-              className={`rounded-md px-3 py-1 font-medium transition-colors ${
-                mode === "foundry" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-              }`}
-            >
-              Foundry 企业分析
-            </button>
-            <button
-              onClick={() => {
-                setMode("gotham")
-                setView("graph")
-              }}
-              className={`rounded-md px-3 py-1 font-medium transition-colors ${
-                mode === "gotham" ? "bg-violet-500/15 text-violet-600 dark:text-violet-400" : "text-muted-foreground"
-              }`}
-            >
-              Gotham 调查分析
-            </button>
-          </div>
+          offline ? (
+            <Badge variant="warning">
+              <WifiOffIcon /> 分析服务未启动
+            </Badge>
+          ) : (
+            <Badge variant="brand">数据分析</Badge>
+          )
         }
       />
 
@@ -105,18 +147,258 @@ export default function AnalysisPage() {
           </button>
         ))}
         <div className="ml-auto pr-2 text-xs text-muted-foreground">
-          {mode === "gotham" ? "调查上下文：锦程贸易案" : "分析上下文：设备运营"}
+          {isAgg ? (table ? `分析上下文：${table.label}` : "") : "演示数据 · 待接本体服务"}
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-        {view === "graph" && <GraphView />}
-        {view === "timeline" && <TimelineView />}
-        {view === "map" && <MapView />}
-        {view === "table" && <TableView />}
-      </div>
+      {isAgg ? (
+        <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr] gap-4">
+          {/* Config panel */}
+          <div className="space-y-4 overflow-auto rounded-xl border border-border bg-card p-4">
+            <div>
+              <div className="mb-1 text-xs text-muted-foreground">数据表</div>
+              <select
+                className={SELECT_CLASS}
+                value={tableName}
+                onChange={(e) => {
+                  const t = tables.find((x) => x.name === e.target.value)
+                  if (t) selectTable(t)
+                }}
+              >
+                {tables.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.label} · {t.row_count} 行
+                  </option>
+                ))}
+              </select>
+              {table && <div className="mt-1 text-xs text-muted-foreground">{table.desc}</div>}
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs text-muted-foreground">分组维度</div>
+              <select className={SELECT_CLASS} value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
+                <option value="">不分组（整体汇总）</option>
+                {dimensions.map((d) => (
+                  <option key={d.name} value={d.name}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
+                <span>度量</span>
+                {metrics.length < 3 && (
+                  <button
+                    onClick={() =>
+                      measures[0] && setMetrics((m) => [...m, { field: measures[0].name, agg: "sum" }])
+                    }
+                    className="flex items-center gap-0.5 hover:text-foreground"
+                  >
+                    <PlusIcon className="size-3" /> 添加
+                  </button>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {metrics.map((m, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <select
+                      className={SELECT_CLASS}
+                      value={m.field}
+                      onChange={(e) =>
+                        setMetrics((all) => all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
+                      }
+                    >
+                      {measures.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className={`${SELECT_CLASS} w-24 shrink-0`}
+                      value={m.agg}
+                      onChange={(e) =>
+                        setMetrics((all) =>
+                          all.map((x, j) => (j === i ? { ...x, agg: e.target.value as MetricAgg } : x))
+                        )
+                      }
+                    >
+                      {AGG_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    {metrics.length > 1 && (
+                      <button
+                        onClick={() => setMetrics((all) => all.filter((_, j) => j !== i))}
+                        className="text-muted-foreground hover:text-red-500"
+                        aria-label="删除度量"
+                      >
+                        <XIcon className="size-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <FilterIcon className="size-3" /> 过滤条件
+                </span>
+                <button
+                  onClick={() =>
+                    table && setFilters((f) => [...f, { field: table.columns[1].name, op: "eq", value: "" }])
+                  }
+                  className="flex items-center gap-0.5 hover:text-foreground"
+                >
+                  <PlusIcon className="size-3" /> 添加
+                </button>
+              </div>
+              <div className="space-y-1.5">
+                {filters.length === 0 && <div className="text-xs text-muted-foreground">无</div>}
+                {filters.map((f, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <select
+                      className={`${SELECT_CLASS} w-24 shrink-0`}
+                      value={f.field}
+                      onChange={(e) =>
+                        setFilters((all) => all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
+                      }
+                    >
+                      {table?.columns.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className={`${SELECT_CLASS} w-16 shrink-0`}
+                      value={f.op}
+                      onChange={(e) =>
+                        setFilters((all) =>
+                          all.map((x, j) => (j === i ? { ...x, op: e.target.value as FilterOp } : x))
+                        )
+                      }
+                    >
+                      {OP_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      value={f.value}
+                      placeholder="值"
+                      onChange={(e) =>
+                        setFilters((all) => all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
+                      }
+                    />
+                    <button
+                      onClick={() => setFilters((all) => all.filter((_, j) => j !== i))}
+                      className="text-muted-foreground hover:text-red-500"
+                      aria-label="删除过滤"
+                    >
+                      <XIcon className="size-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {result && table && (
+              <div className="border-t border-border pt-3 text-xs text-muted-foreground">
+                命中 {result.matched_rows} 行 / 共 {table.row_count} 行
+              </div>
+            )}
+          </div>
+
+          {/* Results */}
+          <div className="flex min-h-0 flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {result?.columns.slice(1).map((label, i) => (
+                <div key={label} className="rounded-lg border border-border bg-card p-3">
+                  <div className="text-xs text-muted-foreground">{label}</div>
+                  <div className="text-xl font-semibold">{formatValue(result.totals[i])}</div>
+                </div>
+              ))}
+              {result && (
+                <div className="rounded-lg border border-border bg-card p-3">
+                  <div className="text-xs text-muted-foreground">命中记录</div>
+                  <div className="text-xl font-semibold">{formatValue(result.matched_rows)}</div>
+                </div>
+              )}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card">
+              {!result ? (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  {offline ? "分析服务未启动" : "配置左侧参数开始分析"}
+                </div>
+              ) : (
+                <ResultTable result={result} />
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
+          {view === "graph" && <GraphView />}
+          {view === "timeline" && <TimelineView />}
+          {view === "map" && <MapView />}
+        </div>
+      )}
     </PageContainer>
   )
+}
+
+function ResultTable({ result }: { result: AnalyzeResult }) {
+  return (
+    <table className="w-full text-sm">
+      <thead className="text-xs text-muted-foreground">
+        <tr className="border-b border-border">
+          {result.columns.map((c) => (
+            <th key={c} className="px-4 py-2 text-left font-medium last:text-right">
+              {c}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {result.rows.map((r) => (
+          <tr key={r.group} className="border-b border-border/60 hover:bg-muted/50">
+            <td className="px-4 py-2">{r.group}</td>
+            {result.columns.slice(1).map((c, i) => (
+              <td key={c} className={`px-4 py-2 ${i === result.columns.length - 2 ? "text-right" : ""}`}>
+                {formatValue(r[`m${i}`] as number)}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+// --- Prototype views below: demo data until the ontology service exists. ---
+
+const NODE_COLOR: Record<GraphNode["type"], string> = {
+  person: "#10b981",
+  org: "#0ea5e9",
+  account: "#a855f7",
+  device: "#f59e0b",
+  event: "#ef4444",
+}
+const NODE_LABEL: Record<GraphNode["type"], string> = {
+  person: "人员",
+  org: "组织",
+  account: "账户",
+  device: "设备",
+  event: "事件",
 }
 
 function GraphView() {
@@ -212,52 +494,6 @@ function MapView() {
           <span className={`absolute inset-0 animate-ping rounded-full ${p.risk ? "bg-red-500/60" : "bg-emerald-500/60"}`} />
         </span>
       ))}
-    </div>
-  )
-}
-
-function TableView() {
-  const { open } = useResourceDrawer()
-  return (
-    <div className="h-full overflow-auto">
-      <div className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4">
-        {[
-          { k: "订单履约率", v: "94.2%", d: "+1.8%" },
-          { k: "设备可用率", v: "98.1%", d: "-0.3%" },
-          { k: "平均故障率", v: "3.4%", d: "+0.6%" },
-          { k: "在途订单", v: "12,904", d: "+320" },
-        ].map((m) => (
-          <div key={m.k} className="rounded-lg border border-border p-3">
-            <div className="text-xs text-muted-foreground">{m.k}</div>
-            <div className="text-xl font-semibold">{m.v}</div>
-            <div className="text-xs text-emerald-500">{m.d}</div>
-          </div>
-        ))}
-      </div>
-      <table className="w-full text-sm">
-        <thead className="text-xs text-muted-foreground">
-          <tr className="border-y border-border">
-            <th className="px-4 py-2 text-left font-medium">设备 ID</th>
-            <th className="px-4 py-2 text-left font-medium">型号</th>
-            <th className="px-4 py-2 text-left font-medium">站点</th>
-            <th className="px-4 py-2 text-right font-medium">故障率</th>
-          </tr>
-        </thead>
-        <tbody>
-          {DEVICE_ROWS.map((r) => (
-            <tr
-              key={r.id}
-              onClick={() => open({ name: r.id, kind: "设备对象" })}
-              className="cursor-pointer border-b border-border/60 hover:bg-muted/50"
-            >
-              <td className="px-4 py-2 font-mono text-emerald-500">{r.id}</td>
-              <td className="px-4 py-2">{r.model}</td>
-              <td className="px-4 py-2 text-muted-foreground">{r.site}</td>
-              <td className={`px-4 py-2 text-right ${r.failureRate > 5 ? "text-red-500" : ""}`}>{r.failureRate}%</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   )
 }
