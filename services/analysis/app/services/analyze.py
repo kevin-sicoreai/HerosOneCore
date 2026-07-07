@@ -26,10 +26,19 @@ def _matches(row: dict, f: FilterSpec) -> bool:
     return number > target if f.op == "gt" else number < target
 
 
+def _to_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _aggregate(rows: list[dict], metric: MetricSpec) -> float:
     if metric.agg == "count":
         return float(len(rows))
-    values = [float(r[metric.field]) for r in rows if isinstance(r.get(metric.field), (int, float))]
+    values = [n for r in rows if (n := _to_number(r.get(metric.field))) is not None]
     if not values:
         return 0.0
     if metric.agg == "sum":

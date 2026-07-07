@@ -1,33 +1,42 @@
 "use client"
 
 import * as React from "react"
-import { BoxesIcon, FilterIcon, SearchIcon } from "lucide-react"
+import { BoxesIcon, SearchIcon } from "lucide-react"
 
-import { DEVICE_ROWS } from "@/lib/mock"
+import { ontologyApi, type GraphNode, type ObjectList, type OntologyGraph } from "@/lib/ontology-api"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
-import { Badge } from "@/components/ui/badge"
-
-const OBJECT_TYPES = [
-  { name: "设备 Device", count: "12,480", active: true },
-  { name: "订单 Order", count: "1.2M" },
-  { name: "供应商 Supplier", count: "3,120" },
-  { name: "传感器 Sensor", count: "48,900" },
-  { name: "站点 Site", count: "260" },
-]
-
-const STATUS_VARIANT = {
-  运行: "success",
-  告警: "warning",
-  停机: "danger",
-} as const
 
 export default function ExplorerPage() {
   const { open } = useResourceDrawer()
+  const [graph, setGraph] = React.useState<OntologyGraph>({ nodes: [], links: [] })
+  const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [instances, setInstances] = React.useState<ObjectList | null>(null)
   const [q, setQ] = React.useState("")
-  const rows = DEVICE_ROWS.filter(
-    (r) => r.id.toLowerCase().includes(q.toLowerCase()) || r.model.toLowerCase().includes(q.toLowerCase())
-  )
+  const [loading, setLoading] = React.useState(true)
+
+  React.useEffect(() => {
+    ontologyApi
+      .graph()
+      .then((g) => {
+        setGraph(g)
+        if (g.nodes[0]) setSelectedId(g.nodes[0].id)
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  React.useEffect(() => {
+    setQ("")
+    if (!selectedId) { setInstances(null); return }
+    ontologyApi.objects(selectedId, 100).then(setInstances).catch(() => setInstances(null))
+  }, [selectedId])
+
+  const selectedNode = graph.nodes.find((n) => n.id === selectedId) ?? null
+  const primaryKeyCol = instances?.columns[0]
+  const rows =
+    instances?.rows.filter((r) =>
+      q === "" || Object.values(r).some((v) => String(v ?? "").toLowerCase().includes(q.toLowerCase()))
+    ) ?? []
 
   return (
     <PageContainer className="h-full">
@@ -43,28 +52,22 @@ export default function ExplorerPage() {
           <div className="rounded-xl border border-border bg-card p-3">
             <div className="mb-2 text-xs font-medium text-muted-foreground">对象类型</div>
             <div className="space-y-0.5">
-              {OBJECT_TYPES.map((t) => (
+              {graph.nodes.map((t: GraphNode) => (
                 <button
-                  key={t.name}
+                  key={t.id}
+                  onClick={() => setSelectedId(t.id)}
                   className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
-                    t.active ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "hover:bg-muted"
+                    selectedId === t.id ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "hover:bg-muted"
                   }`}
                 >
-                  <span className="truncate">{t.name}</span>
-                  <span className="text-xs text-muted-foreground">{t.count}</span>
+                  <span className="truncate">{t.display_name}</span>
+                  <span className="text-xs text-muted-foreground">{t.instance_count ?? "—"}</span>
                 </button>
               ))}
+              {!loading && graph.nodes.length === 0 && (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">暂无对象类型，请先在本体管理器中创建</div>
+              )}
             </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-3">
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <FilterIcon className="size-3.5" /> 过滤
-            </div>
-            {["状态 = 告警", "故障率 > 5%", "站点 = 华东"].map((f) => (
-              <label key={f} className="flex items-center gap-2 py-1 text-sm">
-                <input type="checkbox" className="accent-emerald-500" /> {f}
-              </label>
-            ))}
           </div>
         </div>
 
@@ -76,7 +79,7 @@ export default function ExplorerPage() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="搜索设备 ID / 型号…"
+                placeholder="搜索…"
                 className="h-8 w-full rounded-lg border border-input bg-transparent pr-2 pl-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
               />
             </div>
@@ -86,35 +89,35 @@ export default function ExplorerPage() {
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
                 <tr className="border-b border-border">
-                  <th className="px-3 py-2 text-left font-medium">设备 ID</th>
-                  <th className="px-3 py-2 text-left font-medium">型号</th>
-                  <th className="px-3 py-2 text-left font-medium">站点</th>
-                  <th className="px-3 py-2 text-left font-medium">状态</th>
-                  <th className="px-3 py-2 text-right font-medium">故障率</th>
-                  <th className="px-3 py-2 text-right font-medium">最近上报</th>
+                  {instances?.columns.map((c) => (
+                    <th key={c} className="px-3 py-2 text-left font-medium">{c}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {rows.map((r, i) => (
                   <tr
-                    key={r.id}
-                    onClick={() => open({ name: r.id, kind: "设备对象" })}
+                    key={i}
+                    onClick={() =>
+                      open({
+                        name: primaryKeyCol ? String(r[primaryKeyCol] ?? "") : String(i),
+                        kind: `${selectedNode?.display_name ?? "对象"}对象`,
+                      })
+                    }
                     className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
                   >
-                    <td className="px-3 py-2 font-mono text-emerald-500">{r.id}</td>
-                    <td className="px-3 py-2">{r.model}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{r.site}</td>
-                    <td className="px-3 py-2">
-                      <Badge variant={STATUS_VARIANT[r.status]}>{r.status}</Badge>
-                    </td>
-                    <td className={`px-3 py-2 text-right font-medium ${r.failureRate > 5 ? "text-red-500" : ""}`}>
-                      {r.failureRate}%
-                    </td>
-                    <td className="px-3 py-2 text-right text-xs text-muted-foreground">{r.lastSeen}</td>
+                    {instances?.columns.map((c, j) => (
+                      <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
+                        {String(r[c] ?? "")}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
             </table>
+            {instances && rows.length === 0 && (
+              <div className="p-6 text-center text-sm text-muted-foreground">无匹配对象</div>
+            )}
           </div>
         </div>
       </div>

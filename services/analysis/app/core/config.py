@@ -8,7 +8,9 @@ class Settings(BaseSettings):
 
     # Future seam: when the data service is ready, a DataServiceProvider reads
     # datasets from here instead of the built-in mock tables.
-    data_service_url: str = "http://localhost:8000"
+    # 127.0.0.1, not localhost: on Windows, resolving "localhost" tries IPv6
+    # first and adds ~2s per request before falling back to IPv4.
+    data_service_url: str = "http://127.0.0.1:8000"
 
     log_level: str = "INFO"
 
