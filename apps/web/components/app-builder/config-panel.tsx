@@ -2,7 +2,6 @@
 
 import {
   BIND_OBJECTS,
-  DATA_SOURCES,
   REFRESH_MODES,
   WIDGET_META,
   type Widget,
@@ -25,9 +24,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 export function ConfigPanel({
   widget,
+  dataSources,
   onChange,
 }: {
   widget: Widget | null
+  // Dataset names from the data service; falls back to the stub list.
+  dataSources: string[]
   onChange: (id: string, patch: Partial<WidgetConfig>) => void
 }) {
   return (
@@ -64,7 +66,11 @@ export function ConfigPanel({
                 value={widget.config.dataSource}
                 onChange={(e) => onChange(widget.id, { dataSource: e.target.value })}
               >
-                {DATA_SOURCES.map((o) => (
+                {/* Keep the widget's saved value selectable even if it's not in the current catalog. */}
+                {(dataSources.includes(widget.config.dataSource)
+                  ? dataSources
+                  : [widget.config.dataSource, ...dataSources]
+                ).map((o) => (
                   <option key={o}>{o}</option>
                 ))}
               </select>

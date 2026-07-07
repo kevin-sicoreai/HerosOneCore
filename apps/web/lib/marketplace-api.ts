@@ -4,7 +4,7 @@
 import type { AppDraft } from "@/lib/app-builder/types"
 
 export const MARKETPLACE_API =
-  process.env.NEXT_PUBLIC_MARKETPLACE_API_URL ?? "http://localhost:8002"
+  process.env.NEXT_PUBLIC_MARKETPLACE_API_URL ?? "/api/marketplace"
 
 export type MarketApp = {
   id: string

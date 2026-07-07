@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # Publishing pushes a definition snapshot to the marketplace service.
     marketplace_url: str = "http://localhost:8002"
 
+    # Auth service: resolves the caller's Bearer token to a user id.
+    auth_api_url: str = "http://localhost:8005"
+
     log_level: str = "INFO"
 
 

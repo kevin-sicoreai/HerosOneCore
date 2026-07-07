@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
       { source: "/api/ontology/:path*", destination: "http://127.0.0.1:8003/:path*" },
       { source: "/api/governance/:path*", destination: "http://127.0.0.1:8004/:path*" },
       { source: "/api/auth/:path*", destination: "http://127.0.0.1:8005/:path*" },
+      { source: "/api/assist/:path*", destination: "http://127.0.0.1:8006/:path*" },
+      { source: "/api/app-builder/:path*", destination: "http://127.0.0.1:8007/:path*" },
+      { source: "/api/analysis/:path*", destination: "http://127.0.0.1:8008/:path*" },
+      { source: "/api/marketplace/:path*", destination: "http://127.0.0.1:8002/:path*" },
     ]
   },
 }

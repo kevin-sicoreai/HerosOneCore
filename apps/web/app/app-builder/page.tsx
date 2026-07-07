@@ -24,7 +24,8 @@ import {
 } from "lucide-react"
 
 import { useAppDraft } from "@/lib/app-builder/store"
-import type { WidgetType } from "@/lib/app-builder/types"
+import { DATA_SOURCES, type WidgetType } from "@/lib/app-builder/types"
+import { dataApi } from "@/lib/data-api"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -44,6 +45,17 @@ export default function AppBuilderPage() {
   const [notice, setNotice] = React.useState<string | null>(null)
   const [active, setActive] = React.useState<DragData | null>(null)
   const [overSectionId, setOverSectionId] = React.useState<string | null>(null)
+  // Real dataset catalog from the data service; stub options when unavailable.
+  const [dataSources, setDataSources] = React.useState<string[]>(DATA_SOURCES)
+
+  React.useEffect(() => {
+    dataApi
+      .datasets()
+      .then((ds) => {
+        if (ds.length > 0) setDataSources(ds.map((d) => d.name))
+      })
+      .catch(() => {})
+  }, [])
 
   // Small activation distance so plain clicks still select widgets.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -185,7 +197,7 @@ export default function AppBuilderPage() {
               }}
               onRemoveSection={store.removeSection}
             />
-            <ConfigPanel widget={selectedWidget} onChange={store.updateConfig} />
+            <ConfigPanel widget={selectedWidget} dataSources={dataSources} onChange={store.updateConfig} />
           </div>
           {/* dropAnimation disabled: the rAF-driven animation never finishes in
               throttled/background tabs, leaving a stuck overlay that blocks

@@ -31,6 +31,9 @@ router = APIRouter()
 TOOL_DISPLAY: dict[str, dict[str, str]] = {
     "search_objects": {"icon": "search", "text": "检索本体对象「设备」"},
     "aggregate_failure_rate": {"icon": "compute", "text": "聚合设备故障率"},
+    "list_datasets": {"icon": "search", "text": "查询数据集目录"},
+    "get_dataset_schema": {"icon": "cite", "text": "读取数据集表结构"},
+    "preview_dataset": {"icon": "search", "text": "预览数据集数据"},
     "write_todos": {"icon": "model", "text": "规划任务步骤"},
 }
 
@@ -77,6 +80,14 @@ def _summarize(name: str, output_text: str) -> tuple[str, list[str], list[dict]]
         elif name == "aggregate_failure_rate":
             summary = f"{len(data.get('groups', []))} 个分组"
             devices = data.get("top_risk", [])
+        elif name == "list_datasets":
+            summary = f"{data.get('total', 0)} 个数据集"
+        elif name == "get_dataset_schema":
+            summary = f"{len(data.get('columns', []))} 列"
+        elif name == "preview_dataset":
+            summary = f"{len(data.get('rows', []))} 行"
+        if data.get("error"):
+            summary = "不可用"
     return summary, sources, devices
 
 

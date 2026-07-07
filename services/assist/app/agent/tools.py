@@ -1,12 +1,16 @@
 """Agent tools.
 
-Mock ontology data for now (aligned with the frontend prototype's device rows);
-these swap to real ontology/data service calls once their read APIs exist.
+Device/object tools use mock ontology data for now (aligned with the frontend
+prototype); they swap to the ontology service once its read API exists.
+Dataset tools call the real data service.
 """
 
 import json
 
+import httpx
 from langchain_core.tools import tool
+
+from app.clients import data_service
 
 DEVICES: list[dict] = [
     {"id": "DV-10231", "model": "TX-500", "site": "华东-01", "status": "告警", "failure_rate": 8.4, "last_seen": "2 分钟前"},
@@ -69,4 +73,84 @@ def aggregate_failure_rate(days: int = 30, group_by: str = "model") -> str:
     )
 
 
-AGENT_TOOLS = [search_objects, aggregate_failure_rate]
+_DATA_UNAVAILABLE = json.dumps(
+    {"error": "data 服务不可用，无法查询数据集"}, ensure_ascii=False
+)
+
+
+@tool
+def list_datasets() -> str:
+    """列出平台上已接入的真实数据集（来自 data 服务）。
+
+    Returns:
+        JSON：{"total", "datasets": [{"id", "name", "row_count", "last_synced_at"}], "source"}。
+    """
+    try:
+        datasets = data_service.list_datasets()
+    except httpx.HTTPError:
+        return _DATA_UNAVAILABLE
+    return json.dumps(
+        {
+            "total": len(datasets),
+            "datasets": [
+                {
+                    "id": d.get("id"),
+                    "name": d.get("name"),
+                    "row_count": d.get("row_count"),
+                    "last_synced_at": d.get("last_synced_at"),
+                }
+                for d in datasets
+            ],
+            "source": "数据集目录",
+        },
+        ensure_ascii=False,
+    )
+
+
+@tool
+def get_dataset_schema(dataset: str) -> str:
+    """查看某个数据集的表结构（列名与类型）。dataset 传数据集名称或 ID。
+
+    Returns:
+        JSON：{"dataset", "columns": [{"name", "data_type", "nullable"}], "source"}。
+    """
+    try:
+        found = data_service.find_dataset(dataset)
+        if found is None:
+            return json.dumps({"error": f"数据集 '{dataset}' 不存在"}, ensure_ascii=False)
+        columns = data_service.get_schema(found["id"])
+    except httpx.HTTPError:
+        return _DATA_UNAVAILABLE
+    return json.dumps(
+        {"dataset": found["name"], "columns": columns, "source": found["name"]},
+        ensure_ascii=False,
+    )
+
+
+@tool
+def preview_dataset(dataset: str, limit: int = 10) -> str:
+    """预览某个数据集的前若干行真实数据。dataset 传数据集名称或 ID，limit 默认 10（最大 50）。
+
+    Returns:
+        JSON：{"dataset", "columns", "rows", "source"}。
+    """
+    try:
+        found = data_service.find_dataset(dataset)
+        if found is None:
+            return json.dumps({"error": f"数据集 '{dataset}' 不存在"}, ensure_ascii=False)
+        data = data_service.preview(found["id"], min(max(limit, 1), 50))
+    except httpx.HTTPError:
+        return _DATA_UNAVAILABLE
+    return json.dumps(
+        {
+            "dataset": found["name"],
+            "columns": data.get("columns", []),
+            "rows": data.get("rows", []),
+            "source": found["name"],
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+AGENT_TOOLS = [search_objects, aggregate_failure_rate, list_datasets, get_dataset_schema, preview_dataset]

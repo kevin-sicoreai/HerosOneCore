@@ -2,7 +2,7 @@
 // behind the gateway once it exists.
 
 export const ANALYSIS_API =
-  process.env.NEXT_PUBLIC_ANALYSIS_API_URL ?? "http://localhost:8008"
+  process.env.NEXT_PUBLIC_ANALYSIS_API_URL ?? "/api/analysis"
 
 export type AnalysisColumn = {
   name: string

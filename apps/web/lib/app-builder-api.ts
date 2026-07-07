@@ -2,9 +2,10 @@
 // behind the gateway once it exists.
 
 import type { AppDraft } from "@/lib/app-builder/types"
+import { getToken } from "@/lib/auth-api"
 
 export const APP_BUILDER_API =
-  process.env.NEXT_PUBLIC_APP_BUILDER_API_URL ?? "http://localhost:8007"
+  process.env.NEXT_PUBLIC_APP_BUILDER_API_URL ?? "/api/app-builder"
 
 export type BuilderApp = {
   id: string
@@ -16,8 +17,13 @@ export type BuilderApp = {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken()
   const res = await fetch(`${APP_BUILDER_API}${path}`, {
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      // Drafts are per-user: the service resolves this token via the auth service.
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     ...init,
   })
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
