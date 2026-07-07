@@ -13,3 +13,30 @@ def get_dataset(dataset_id: str) -> dict[str, Any]:
     resp = httpx.get(url, timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+
+_PIPELINE_CONNECTOR_NAME = "管道产出"
+
+
+def ensure_pipeline_connector() -> str:
+    """Return the id of the internal connector that pipeline marts are cataloged under,
+    creating it once if needed."""
+    resp = httpx.get(f"{settings.data_api_url}/connectors", timeout=10)
+    resp.raise_for_status()
+    for c in resp.json():
+        if c["name"] == _PIPELINE_CONNECTOR_NAME:
+            return c["id"]
+    created = httpx.post(
+        f"{settings.data_api_url}/connectors",
+        json={"name": _PIPELINE_CONNECTOR_NAME, "source_type": "internal", "config": {}},
+        timeout=10,
+    )
+    created.raise_for_status()
+    return created.json()["id"]
+
+
+def register_dataset(payload: dict[str, Any]) -> dict[str, Any]:
+    """Register a pipeline mart into the data-service catalog."""
+    resp = httpx.post(f"{settings.data_api_url}/datasets", json=payload, timeout=15)
+    resp.raise_for_status()
+    return resp.json()

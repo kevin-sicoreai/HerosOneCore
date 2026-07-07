@@ -33,6 +33,23 @@ class DatasetDetailOut(DatasetOut):
     columns: list[DatasetColumnOut]
 
 
+class DatasetColumnIn(BaseModel):
+    name: str
+    data_type: str
+    nullable: bool = True
+
+
+class DatasetRegister(BaseModel):
+    """Register a dataset produced inside the platform (e.g. a pipeline mart)."""
+
+    name: str
+    connector_id: str
+    storage_uri: str
+    layer: str = "mart"
+    row_count: int | None = None
+    columns: list[DatasetColumnIn] = []
+
+
 class DatasetPreviewOut(BaseModel):
     dataset_id: str
     columns: list[str]

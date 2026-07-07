@@ -11,6 +11,7 @@ import {
   UsersIcon,
 } from "lucide-react"
 
+import { governanceApi, type AuditEntry, type Lineage, type Role } from "@/lib/governance-api"
 import { AUDIT, GRANTS, LINEAGE } from "@/lib/mock"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -40,6 +41,11 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
   const [resource, setResource] = React.useState<ResourceRef | null>(null)
   const [open, setOpen] = React.useState(false)
 
+  // Real governance data (falls back to mock if the service is unavailable).
+  const [roles, setRoles] = React.useState<Role[]>([])
+  const [audit, setAudit] = React.useState<AuditEntry[]>([])
+  const [lineage, setLineage] = React.useState<Lineage>({ nodes: [], edges: [] })
+
   const api = React.useMemo<Ctx>(
     () => ({
       open: (r) => {
@@ -49,6 +55,50 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
     }),
     []
   )
+
+  React.useEffect(() => {
+    if (!open || !resource) return
+    Promise.all([governanceApi.roles(), governanceApi.audit(50), governanceApi.lineage()])
+      .then(([r, a, l]) => {
+        setRoles(r)
+        setAudit(a)
+        setLineage(l)
+      })
+      .catch(() => {})
+  }, [open, resource])
+
+  // --- lineage: upstream (incoming edges) and downstream (outgoing edges) are
+  //     both computed from the real platform lineage graph.
+  const node = lineage.nodes.find((n) => n.label === resource?.name)
+  const realUpstream = node
+    ? lineage.edges
+        .filter((e) => e.to_id === node.id)
+        .map((e) => lineage.nodes.find((n) => n.id === e.from_id)?.label)
+        .filter((x): x is string => !!x)
+    : []
+  const realDownstream = node
+    ? lineage.edges
+        .filter((e) => e.from_id === node.id)
+        .map((e) => lineage.nodes.find((n) => n.id === e.to_id)?.label)
+        .filter((x): x is string => !!x)
+    : []
+  const upstreamItems = realUpstream.length ? realUpstream : LINEAGE.upstream
+  const downstreamItems = realDownstream.length ? realDownstream : LINEAGE.downstream
+
+  // --- access: real roles, else mock ---
+  const accessRows = roles.length
+    ? roles.map((r) => ({ role: r.name, members: r.members, read: r.can_read, write: r.can_write, admin: r.can_admin }))
+    : GRANTS
+
+  // --- audit: real (prefer entries about this resource), else mock ---
+  const forResource = audit.filter((a) => a.target === resource?.name)
+  const auditRows = audit.length
+    ? (forResource.length ? forResource : audit).slice(0, 10).map((a) => ({
+        action: a.action,
+        sub: `${a.source} · ${a.target}`,
+        time: a.time ? a.time.slice(0, 19).replace("T", " ") : "",
+      }))
+    : AUDIT.map((a) => ({ action: a.action, sub: `${a.user} · ${a.target}`, time: a.time }))
 
   return (
     <ResourceDrawerContext.Provider value={api}>
@@ -81,18 +131,18 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
 
               <TabsContent value="lineage" className="pt-3">
                 <div className="space-y-3">
-                  <LineageBlock title="上游" items={LINEAGE.upstream} />
+                  <LineageBlock title="上游" items={upstreamItems} />
                   <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium">
                     <GitCommitVerticalIcon className="size-4 text-emerald-500" />
                     {resource?.name ?? LINEAGE.node}
                   </div>
-                  <LineageBlock title="下游" items={LINEAGE.downstream} />
+                  <LineageBlock title="下游" items={downstreamItems} />
                 </div>
               </TabsContent>
 
               <TabsContent value="access" className="pt-3">
                 <div className="space-y-2">
-                  {GRANTS.map((g) => (
+                  {accessRows.map((g) => (
                     <div
                       key={g.role}
                       className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
@@ -116,16 +166,14 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
 
               <TabsContent value="audit" className="pt-3">
                 <ol className="relative space-y-4 border-l border-border pl-4">
-                  {AUDIT.map((a, i) => (
+                  {auditRows.map((a, i) => (
                     <li key={i} className="relative">
                       <span className="absolute -left-[21px] top-1 flex size-3 items-center justify-center rounded-full bg-emerald-500 ring-4 ring-background" />
                       <div className="flex items-center gap-2 text-sm font-medium">
                         <FingerprintIcon className="size-3.5 text-muted-foreground" />
                         {a.action}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {a.user} · {a.target}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{a.sub}</div>
                       <div className="text-xs text-muted-foreground/70">{a.time}</div>
                     </li>
                   ))}

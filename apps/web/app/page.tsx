@@ -3,18 +3,20 @@
 import * as React from "react"
 import Link from "next/link"
 import {
-  ArrowRightIcon,
   BlocksIcon,
   BoxesIcon,
   ChevronRightIcon,
   DatabaseIcon,
   FolderIcon,
+  PlugIcon,
   Share2Icon,
   SparklesIcon,
   WorkflowIcon,
 } from "lucide-react"
 
-import { KIND_LABEL, RESOURCE_TREE, type Resource, type ResourceKind } from "@/lib/mock"
+import { dataApi } from "@/lib/data-api"
+import { ontologyApi } from "@/lib/ontology-api"
+import { pipelineApi } from "@/lib/pipeline-api"
 import { useWorkspace } from "@/components/workspace-context"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
@@ -22,23 +24,64 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
-const KIND_ICON: Record<ResourceKind, React.ElementType> = {
+type Kind = "folder" | "dataset" | "object-type" | "pipeline"
+type Node = { id: string; name: string; kind: Kind; owner?: string; children?: Node[] }
+
+const KIND_ICON: Record<Kind, React.ElementType> = {
   folder: FolderIcon,
   dataset: DatabaseIcon,
   "object-type": Share2Icon,
   pipeline: WorkflowIcon,
-  application: BlocksIcon,
 }
-
-const STATS = [
-  { label: "数据集", value: "128", icon: DatabaseIcon },
-  { label: "本体对象类型", value: "42", icon: Share2Icon },
-  { label: "运行中管道", value: "17", icon: WorkflowIcon },
-  { label: "已发布应用", value: "9", icon: BlocksIcon },
-]
+const KIND_LABEL: Record<Kind, string> = {
+  folder: "文件夹",
+  dataset: "数据集",
+  "object-type": "对象类型",
+  pipeline: "管道",
+}
 
 export default function HomePage() {
   const { workspace } = useWorkspace()
+  const [tree, setTree] = React.useState<Node[]>([])
+  const [stats, setStats] = React.useState({ connectors: 0, datasets: 0, objects: 0, pipelines: 0 })
+
+  React.useEffect(() => {
+    ;(async () => {
+      const [connectors, datasets, graph, pipelines] = await Promise.all([
+        dataApi.connectors().catch(() => []),
+        dataApi.datasets().catch(() => []),
+        ontologyApi.graph().catch(() => ({ nodes: [], links: [] })),
+        pipelineApi.list().catch(() => []),
+      ])
+      setStats({
+        connectors: connectors.length,
+        datasets: datasets.length,
+        objects: graph.nodes.length,
+        pipelines: pipelines.length,
+      })
+      setTree([
+        {
+          id: "f-src", name: "数据源", kind: "folder",
+          children: datasets.map((d) => ({ id: d.id, name: d.name, kind: "dataset" as const, owner: d.owner_id ?? "—" })),
+        },
+        {
+          id: "f-onto", name: "本体对象", kind: "folder",
+          children: graph.nodes.map((o) => ({ id: o.id, name: o.display_name, kind: "object-type" as const })),
+        },
+        {
+          id: "f-pipe", name: "管道", kind: "folder",
+          children: pipelines.map((p) => ({ id: p.id, name: p.name, kind: "pipeline" as const })),
+        },
+      ])
+    })()
+  }, [])
+
+  const STATS = [
+    { label: "连接器", value: stats.connectors, icon: PlugIcon },
+    { label: "数据集", value: stats.datasets, icon: DatabaseIcon },
+    { label: "本体对象类型", value: stats.objects, icon: Share2Icon },
+    { label: "管道", value: stats.pipelines, icon: WorkflowIcon },
+  ]
 
   return (
     <PageContainer>
@@ -78,9 +121,12 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <div className="rounded-lg border border-border">
-              {RESOURCE_TREE.map((r) => (
+              {tree.map((r) => (
                 <TreeRow key={r.id} node={r} depth={0} />
               ))}
+              {tree.every((f) => !f.children?.length) && (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">暂无资源</div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -93,16 +139,16 @@ export default function HomePage() {
           </CardHeader>
           <CardContent className="space-y-2.5">
             {[
-              "12 台设备近30天故障率显著上升，建议复查维护管道",
-              "crm_customers 有 3 个字段未接入本体，是否补建对象？",
-              "Salesforce 连接器同步失败，点击查看原因",
+              "点开任意资源，查看其血缘、权限与审计",
+              "在本体管理器中把数据集建成对象类型并连接关系",
+              "在管道构建器中新建转换，产出分析所需的宽表",
             ].map((t, i) => (
               <Link
                 key={i}
                 href="/assist"
                 className="flex items-start gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm transition-colors hover:border-emerald-500/40"
               >
-                <ArrowRightIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
+                <BlocksIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
                 <span>{t}</span>
               </Link>
             ))}
@@ -113,7 +159,7 @@ export default function HomePage() {
   )
 }
 
-function TreeRow({ node, depth }: { node: Resource; depth: number }) {
+function TreeRow({ node, depth }: { node: Node; depth: number }) {
   const { open } = useResourceDrawer()
   const [expanded, setExpanded] = React.useState(depth === 0)
   const Icon = KIND_ICON[node.kind]
@@ -127,20 +173,17 @@ function TreeRow({ node, depth }: { node: Resource; depth: number }) {
         onClick={() => (isFolder ? setExpanded((v) => !v) : open({ name: node.name, kind: KIND_LABEL[node.kind] }))}
       >
         {isFolder ? (
-          <ChevronRightIcon
-            className={`size-3.5 text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
-          />
+          <ChevronRightIcon className={`size-3.5 text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`} />
         ) : (
           <span className="w-3.5" />
         )}
         <Icon className={`size-4 ${isFolder ? "text-muted-foreground" : "text-emerald-500"}`} />
         <span className="flex-1 truncate">{node.name}</span>
-        {!isFolder && (
-          <Badge variant="outline" className="text-[10px]">
-            {KIND_LABEL[node.kind]}
-          </Badge>
+        {isFolder ? (
+          <span className="text-xs text-muted-foreground">{node.children?.length ?? 0}</span>
+        ) : (
+          <Badge variant="outline" className="text-[10px]">{KIND_LABEL[node.kind]}</Badge>
         )}
-        <span className="hidden text-xs text-muted-foreground sm:inline">{node.owner}</span>
       </div>
       {isFolder && expanded && node.children?.map((c) => (
         <TreeRow key={c.id} node={c} depth={depth + 1} />

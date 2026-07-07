@@ -2,7 +2,7 @@
 // gateway once it exists.
 
 export const DATA_API =
-  process.env.NEXT_PUBLIC_DATA_API_URL ?? "http://localhost:8000"
+  process.env.NEXT_PUBLIC_DATA_API_URL ?? "/api/data"
 
 export type ConnectorStatus = "idle" | "syncing" | "connected" | "error"
 

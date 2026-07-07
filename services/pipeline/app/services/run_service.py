@@ -132,7 +132,14 @@ def run_pipeline(pipeline_id: str, run_id: str) -> None:
             logger.warning("pipeline %s run %s failed (dbt)", pipeline_id, run_id)
             return
 
-        # Catalog each output as a mart dataset (P0: stored locally).
+        # Catalog each output: locally, and register it back to the data-service
+        # catalog (as a mart dataset) so ontology/others can build on it.
+        try:
+            pipeline_conn = data_client.ensure_pipeline_connector()
+        except Exception as exc:  # noqa: BLE001 - registration is best-effort
+            pipeline_conn = None
+            logger.warning("cannot resolve pipeline connector in data service: %s", exc)
+
         for out in compiled["outputs"]:
             stats = query.parquet_stats(out["storage_uri"])
             db.add(Output(
@@ -144,6 +151,18 @@ def run_pipeline(pipeline_id: str, run_id: str) -> None:
                 row_count=stats["row_count"],
             ))
             publishers.dataset_created(out["name"], out["storage_uri"], stats["row_count"])
+            if pipeline_conn:
+                try:
+                    data_client.register_dataset({
+                        "name": out["name"],
+                        "connector_id": pipeline_conn,
+                        "storage_uri": out["storage_uri"],
+                        "layer": "mart",
+                        "row_count": stats["row_count"],
+                        "columns": query.columns(out["storage_uri"]),
+                    })
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("register mart '%s' to data catalog failed: %s", out["name"], exc)
 
         run.status = RunStatus.SUCCESS
         run.finished_at = _now()

@@ -100,3 +100,12 @@ _dataplane/
 # Pipeline service artifacts
 pipeline*.db
 _pipelines/
+
+# Ontology service artifacts
+ontology.db
+
+# Governance service artifacts
+governance.db
+
+# Auth service artifacts
+auth.db

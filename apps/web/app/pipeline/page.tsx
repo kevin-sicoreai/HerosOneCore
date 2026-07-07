@@ -224,6 +224,31 @@ export default function PipelinePage() {
     await loadGraph(id)
   }
 
+  async function deletePipeline() {
+    if (!pid) return
+    const name = pipelines.find((p) => p.id === pid)?.name ?? ""
+    if (!window.confirm(`确认删除管道「${name}」？此操作不可撤销。`)) return
+    setBusy(true)
+    setMsg(null)
+    try {
+      await pipelineApi.remove(pid)
+      const list = await pipelineApi.list()
+      setPipelines(list)
+      if (list[0]) {
+        setPid(list[0].id)
+        await loadGraph(list[0].id)
+      } else {
+        setPid("")
+        setSteps([]); setEdges([]); setSelectedId(null); setStepStatus({})
+      }
+      setMsg("已删除")
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "删除失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <PageContainer className="h-full">
       <PageHeading
@@ -242,6 +267,7 @@ export default function PipelinePage() {
               ))}
             </select>
             <Button size="sm" variant="outline" onClick={newPipeline}><PlusIcon /> 新建</Button>
+            <Button size="sm" variant="outline" disabled={busy || !pid} onClick={deletePipeline}><Trash2Icon /> 删除</Button>
             <Button size="sm" variant="outline" disabled={busy || !pid} onClick={save}><SaveIcon /> 保存</Button>
             <Button size="sm" variant="outline" disabled={busy || !pid} onClick={validate}>校验</Button>
             <Button size="sm" disabled={busy || !pid} onClick={run}><PlayIcon /> 运行</Button>
@@ -310,7 +336,7 @@ export default function PipelinePage() {
                     key={n.id}
                     onPointerDown={(e) => onPointerDown(e, n)}
                     onPointerUp={() => onPointerUp(n)}
-                    className={`absolute flex touch-none items-center gap-2 rounded-lg border-2 bg-card px-3 shadow-sm ${k.color} ${ring} ${
+                    className={`absolute z-10 flex touch-none items-center gap-2 rounded-lg border-2 bg-card px-3 shadow-sm ${k.color} ${ring} ${
                       selectedId === n.id ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""
                     } ${isFrom ? "ring-2 ring-sky-400" : ""}`}
                     style={{ left: n.x, top: n.y, width: NODE_W, height: NODE_H, cursor: "grab" }}

@@ -2,7 +2,7 @@
 // gateway later.
 
 export const PIPELINE_API =
-  process.env.NEXT_PUBLIC_PIPELINE_API_URL ?? "http://localhost:8001"
+  process.env.NEXT_PUBLIC_PIPELINE_API_URL ?? "/api/pipeline"
 
 export type StepKind = "source" | "transform" | "join" | "output"
 
@@ -60,4 +60,5 @@ export const pipelineApi = {
   runs: (id: string) => req<Run[]>(`/pipelines/${id}/runs`),
   run: (id: string) => req<Run>(`/pipelines/${id}/run`, { method: "POST" }),
   getRun: (runId: string) => req<Run>(`/runs/${runId}`),
+  remove: (id: string) => req<void>(`/pipelines/${id}`, { method: "DELETE" }),
 }
