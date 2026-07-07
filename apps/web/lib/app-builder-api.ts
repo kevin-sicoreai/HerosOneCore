@@ -4,7 +4,7 @@
 import type { AppDraft } from "@/lib/app-builder/types"
 
 export const APP_BUILDER_API =
-  process.env.NEXT_PUBLIC_APP_BUILDER_API_URL ?? "http://localhost:8003"
+  process.env.NEXT_PUBLIC_APP_BUILDER_API_URL ?? "http://localhost:8007"
 
 export type BuilderApp = {
   id: string

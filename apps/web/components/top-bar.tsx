@@ -5,16 +5,16 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
-  BellIcon,
   ChevronsUpDownIcon,
   LogOutIcon,
   MoonIcon,
   SearchIcon,
-  SettingsIcon,
   SparklesIcon,
   SunIcon,
+  UserIcon,
 } from "lucide-react"
 
+import { authApi, clearToken, type Me } from "@/lib/auth-api"
 import { WORKSPACES } from "@/lib/mock"
 import { findApp } from "@/lib/apps"
 import { useWorkspace } from "@/components/workspace-context"
@@ -102,13 +102,9 @@ export function TopBar() {
         </div>
       </form>
 
-      <div className="ml-auto flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5">
         <AppLauncher />
         <ThemeToggle />
-        <Button variant="ghost" size="icon" aria-label="通知" className="relative">
-          <BellIcon />
-          <span className="absolute top-2 right-2 size-1.5 rounded-full bg-emerald-500" />
-        </Button>
         <UserMenu />
       </div>
     </header>
@@ -132,27 +128,42 @@ function ThemeToggle() {
 }
 
 function UserMenu() {
+  const router = useRouter()
+  const [me, setMe] = React.useState<Me | null>(null)
+
+  React.useEffect(() => {
+    authApi.me().then(setMe).catch(() => setMe(null))
+  }, [])
+
+  function logout() {
+    clearToken()
+    router.replace("/login")
+  }
+
+  const name = me?.username ?? "用户"
+  const roles = me?.roles?.join(" · ") ?? "未登录"
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={<Button variant="ghost" size="icon" className="rounded-full" />}
       >
         <Avatar size="sm">
-          <AvatarFallback>李</AvatarFallback>
+          <AvatarFallback>{name.slice(0, 1).toUpperCase()}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuLabel>
           <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground">李蔚</span>
-            <span className="text-xs">数据工程师 · 平台管理员</span>
+            <span className="text-sm font-medium text-foreground">{name}</span>
+            <span className="text-xs">{roles}</span>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem render={<Link href="/governance" />}>
-          <SettingsIcon /> 治理与设置
+        <DropdownMenuItem render={<Link href="/profile" />}>
+          <UserIcon /> 个人中心
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem onClick={logout}>
           <LogOutIcon /> 退出登录
         </DropdownMenuItem>
       </DropdownMenuContent>

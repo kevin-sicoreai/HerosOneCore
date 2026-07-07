@@ -49,6 +49,8 @@ CONNECTOR_TYPES: list[ConnectorType] = [
     ConnectorType("mongodb", "MongoDB", "database", False),
     ConnectorType("bigquery", "BigQuery", "warehouse", False),
     ConnectorType("excel", "Excel", "file", False),
+    # Internal container for datasets produced inside the platform (e.g. pipeline marts).
+    ConnectorType("internal", "内部/管道产出", "internal", False),
 ]
 
 _BY_TYPE = {ct.type: ct for ct in CONNECTOR_TYPES}

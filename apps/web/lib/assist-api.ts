@@ -2,7 +2,7 @@
 // the gateway once it exists.
 
 export const ASSIST_API =
-  process.env.NEXT_PUBLIC_ASSIST_API_URL ?? "http://localhost:8001"
+  process.env.NEXT_PUBLIC_ASSIST_API_URL ?? "http://localhost:8006"
 
 export type TraceIcon = "search" | "compute" | "cite" | "model"
 

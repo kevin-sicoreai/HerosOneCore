@@ -2,7 +2,7 @@
 // gateway once it exists.
 
 export const DATA_API =
-  process.env.NEXT_PUBLIC_DATA_API_URL ?? "http://localhost:8000"
+  process.env.NEXT_PUBLIC_DATA_API_URL ?? "/api/data"
 
 export type ConnectorStatus = "idle" | "syncing" | "connected" | "error"
 
@@ -35,6 +35,8 @@ export type Dataset = {
   row_count: number | null
   last_synced_at: string | null
   created_at: string
+  // Not returned by the service yet; the home page reads it with a fallback.
+  owner_id?: string | null
 }
 
 export type SyncRun = {

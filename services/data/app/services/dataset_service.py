@@ -1,6 +1,7 @@
 """Dataset use cases: catalog listing, detail/schema, and preview."""
 
 import os
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -8,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.clients import duckdb_loader
 from app.core.config import settings
-from app.repositories.models import Dataset
+from app.repositories.models import Connector, Dataset, DatasetColumn
+from app.schemas.dataset import DatasetRegister
 
 
 def get_or_404(db: Session, dataset_id: str) -> Dataset:
@@ -23,6 +25,33 @@ def list_all(db: Session, connector_id: str | None = None) -> list[Dataset]:
     if connector_id is not None:
         stmt = stmt.where(Dataset.connector_id == connector_id)
     return list(db.scalars(stmt))
+
+
+def register(db: Session, payload: DatasetRegister) -> Dataset:
+    """Register (or update) a dataset produced inside the platform, e.g. a pipeline mart."""
+    if db.get(Connector, payload.connector_id) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"connector not found: {payload.connector_id}")
+
+    dataset = db.scalar(
+        select(Dataset).where(Dataset.connector_id == payload.connector_id, Dataset.name == payload.name)
+    )
+    if dataset is None:
+        dataset = Dataset(connector_id=payload.connector_id, name=payload.name, storage_uri=payload.storage_uri)
+        db.add(dataset)
+    dataset.storage_uri = payload.storage_uri
+    dataset.layer = payload.layer
+    dataset.row_count = payload.row_count
+    dataset.last_synced_at = datetime.now(timezone.utc)
+
+    dataset.columns.clear()
+    db.flush()
+    for ordinal, col in enumerate(payload.columns):
+        dataset.columns.append(
+            DatasetColumn(name=col.name, data_type=col.data_type, nullable=col.nullable, ordinal=ordinal)
+        )
+    db.commit()
+    db.refresh(dataset)
+    return dataset
 
 
 def preview(db: Session, dataset_id: str, limit: int | None = None) -> dict:

@@ -1,6 +1,6 @@
 """Dataset endpoints: catalog, detail/schema, and preview."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -9,10 +9,16 @@ from app.schemas.dataset import (
     DatasetDetailOut,
     DatasetOut,
     DatasetPreviewOut,
+    DatasetRegister,
 )
 from app.services import dataset_service
 
 router = APIRouter(tags=["datasets"])
+
+
+@router.post("/datasets", response_model=DatasetDetailOut, status_code=status.HTTP_201_CREATED)
+def register_dataset(payload: DatasetRegister, db: Session = Depends(get_db)) -> DatasetDetailOut:
+    return DatasetDetailOut.model_validate(dataset_service.register(db, payload))
 
 
 @router.get("/datasets", response_model=list[DatasetOut])
