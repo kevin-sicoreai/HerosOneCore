@@ -39,6 +39,13 @@ export const marketplaceApi = {
   undeploy: (id: string) => req<MarketApp>(`/apps/${id}/undeploy`, { method: "POST" }),
 }
 
+// Fired after deploy/undeploy so the sidebar "我的应用" group can refresh.
+export const APPS_CHANGED_EVENT = "askdelphi:apps-changed"
+
+export function notifyAppsChanged(): void {
+  window.dispatchEvent(new Event(APPS_CHANGED_EVENT))
+}
+
 export function formatInstalls(app: Pick<MarketApp, "tag" | "installs">): string {
   if (app.tag === "custom") return "内部"
   if (app.installs >= 1000) {

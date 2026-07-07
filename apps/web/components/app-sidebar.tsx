@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { HouseIcon } from "lucide-react"
 
 import { AppLogo } from "@/components/app-logo"
+import { NavMyApps } from "@/components/nav-my-apps"
 import { APP_LAYERS } from "@/lib/apps"
 import {
   Sidebar,
@@ -44,27 +45,31 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarGroup>
 
         {APP_LAYERS.map((layer) => (
-          <SidebarGroup key={layer.key}>
-            <SidebarGroupLabel>{layer.label}</SidebarGroupLabel>
-            <SidebarMenu>
-              {layer.apps.map((app) => {
-                const Icon = app.icon
-                const active = pathname === app.href
-                return (
-                  <SidebarMenuItem key={app.key}>
-                    <SidebarMenuButton
-                      tooltip={app.title}
-                      isActive={active}
-                      render={<Link href={app.href} />}
-                    >
-                      <Icon />
-                      <span>{app.title}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroup>
+          <React.Fragment key={layer.key}>
+            <SidebarGroup>
+              <SidebarGroupLabel>{layer.label}</SidebarGroupLabel>
+              <SidebarMenu>
+                {layer.apps.map((app) => {
+                  const Icon = app.icon
+                  const active = pathname === app.href
+                  return (
+                    <SidebarMenuItem key={app.key}>
+                      <SidebarMenuButton
+                        tooltip={app.title}
+                        isActive={active}
+                        render={<Link href={app.href} />}
+                      >
+                        <Icon />
+                        <span>{app.title}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
+            {/* Deployed apps live right below the analysis layer. */}
+            {layer.key === "analysis" && <NavMyApps />}
+          </React.Fragment>
         ))}
       </SidebarContent>
       <SidebarRail />

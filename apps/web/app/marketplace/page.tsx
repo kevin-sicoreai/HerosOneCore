@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { CheckIcon, DownloadIcon, SearchIcon, StoreIcon, WifiOffIcon, XIcon } from "lucide-react"
 
-import { formatInstalls, marketplaceApi, type MarketApp } from "@/lib/marketplace-api"
+import { formatInstalls, marketplaceApi, notifyAppsChanged, type MarketApp } from "@/lib/marketplace-api"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,6 +32,7 @@ export default function MarketplacePage() {
         ? await marketplaceApi.undeploy(app.id)
         : await marketplaceApi.deploy(app.id)
       setApps((prev) => prev.map((a) => (a.id === app.id ? updated : a)))
+      notifyAppsChanged()
     } catch {
       // service down mid-session; the offline badge covers the initial case
     } finally {
