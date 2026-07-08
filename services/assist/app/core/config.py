@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # datasets. 127.0.0.1 (not localhost) avoids Windows' ~2s IPv6 resolution.
     ontology_service_url: str = "http://127.0.0.1:8003"
 
+    # Governance service — type-level data lineage (upstream datasets /
+    # connectors → object type → downstream). 127.0.0.1 (not localhost)
+    # avoids Windows' ~2s IPv6 resolution.
+    governance_service_url: str = "http://127.0.0.1:8004"
+
     log_level: str = "INFO"
 
 

@@ -4,6 +4,7 @@ The agent operates on the built ontology (object types) — the business-facing
 semantic layer over the data plane — not on raw datasets.
 """
 
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -43,5 +44,31 @@ def list_objects(object_type_id: str, limit: int) -> dict[str, Any]:
         params={"limit": limit},
         timeout=_TIMEOUT,
     )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def linked(
+    object_type_id: str, pk_value: str, link_type_id: str, limit: int
+) -> dict[str, Any]:
+    """Objects linked to one source object along an ontology link type.
+
+    Returns {"object_type_id": <the far-side type id>, "columns", "rows"}.
+    The primary key is a path segment, so it is percent-encoded manually
+    (httpx params only encode the query string).
+    """
+    pk = urllib.parse.quote(str(pk_value), safe="")
+    resp = httpx.get(
+        f"{_base()}/object-types/{object_type_id}/objects/{pk}/linked/{link_type_id}",
+        params={"limit": limit},
+        timeout=_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def graph() -> dict[str, Any]:
+    """The ontology graph: object-type nodes and their link types."""
+    resp = httpx.get(f"{_base()}/graph", timeout=_TIMEOUT)
     resp.raise_for_status()
     return resp.json()

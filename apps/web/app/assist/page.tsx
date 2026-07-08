@@ -36,9 +36,9 @@ const TRACE_ICON: Record<TraceIcon, React.ElementType> = {
 }
 
 const SUGGESTIONS = [
-  "平台上有哪些本体对象类型？",
-  "客户 Customer 有哪些属性？",
-  "查一下供应商 Supplier 的数据",
+  "采购单 128 是什么情况？关联了谁、数据从哪来",
+  "订单 1 关联了哪个客户",
+  "供应商 13 供了哪些采购单，数据血缘是什么",
 ]
 
 type UIMessage = {

@@ -32,6 +32,9 @@ TOOL_DISPLAY: dict[str, dict[str, str]] = {
     "list_object_types": {"icon": "search", "text": "查询本体对象类型"},
     "get_object_type_schema": {"icon": "cite", "text": "读取对象类型属性"},
     "search_objects": {"icon": "search", "text": "检索本体对象实例"},
+    "get_object": {"icon": "search", "text": "读取对象详情"},
+    "get_related_objects": {"icon": "compute", "text": "追溯关联对象"},
+    "get_lineage": {"icon": "cite", "text": "查询数据血缘"},
     "write_todos": {"icon": "model", "text": "规划任务步骤"},
 }
 
@@ -76,6 +79,15 @@ def _summarize(name: str, output_text: str) -> tuple[str, list[str]]:
             summary = f"{len(data.get('properties', []))} 个属性"
         elif name == "search_objects":
             summary = f"命中 {data.get('total', len(data.get('rows', [])))} 条"
+        elif name == "get_object":
+            props = data.get("properties")
+            summary = f"{len(props)} 个属性" if isinstance(props, dict) else "已读取"
+        elif name == "get_related_objects":
+            relations = data.get("relations", [])
+            total = sum(r.get("count", 0) for r in relations)
+            summary = f"{len(relations)} 类关联 · {total} 个对象"
+        elif name == "get_lineage":
+            summary = f"上游 {len(data.get('upstream', []))} · 下游 {len(data.get('downstream', []))}"
         if data.get("error"):
             summary = "不可用"
     return summary, sources
