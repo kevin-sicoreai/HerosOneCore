@@ -1,8 +1,10 @@
 """Data access behind an interface so the source can be swapped.
 
-DataServiceProvider reads the live catalog from the data service
-(/datasets + /datasets/{id}/schema + /datasets/{id}/preview, settings.data_service_url).
-MockProvider (the built-in devices/orders tables) remains for offline use.
+OntologyProvider reads the built ontology from the ontology service
+(/object-types + /object-types/{id} + /object-types/{id}/objects,
+settings.ontology_service_url). Analysis operates on object types — the
+business-facing semantic layer — not raw datasets. MockProvider (the built-in
+devices/orders tables) remains for offline use.
 """
 
 from typing import Protocol
@@ -10,12 +12,11 @@ from typing import Protocol
 import httpx
 from fastapi import HTTPException, status
 
-from app.clients import data_service
+from app.clients import ontology_service
 from app.domain.tables import TABLES, Column, Table
 
-# The data service caps dataset previews at 1000 rows (settings.preview_max_limit);
-# requesting that much always fills the workbench with as much of the dataset as
-# the API will hand over, even for datasets it happens to exceed (e.g. inventory).
+# The ontology objects endpoint caps previews at 1000 rows (preview_max_limit);
+# request that much so the workbench sees as much of each object type as it serves.
 _PREVIEW_ROWS = 1000
 
 _NUMERIC_TYPES = {
@@ -23,36 +24,24 @@ _NUMERIC_TYPES = {
     "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "REAL",
 }
 
-# Friendly labels for the demo dataset catalog; unknown datasets fall back to their raw name.
-_LABELS: dict[str, tuple[str, str]] = {
-    "customers": ("客户", "客户主数据（销售）"),
-    "orders": ("订单", "订单履约明细（销售）"),
-    "suppliers": ("供应商", "供应商名录及评级（供应链）"),
-    "warehouses": ("仓库", "仓库容量与城市分布（供应链）"),
-    "products": ("产品", "产品目录及成本（供应链）"),
-    "inventory": ("库存", "库存水位与安全库存（供应链）"),
-    "purchase_orders": ("采购单", "采购订单状态与金额（供应链）"),
-    "shipments": ("发运单", "发运追踪与承运商（供应链）"),
-}
 
-
-def _column_kind(name: str, data_type: str) -> str:
-    if name == "id" or name.endswith("_id"):
+def _column_kind(name: str, data_type: str, is_primary_key: bool) -> str:
+    if is_primary_key or name == "id" or name.endswith("_id"):
         return "dimension"
     base = data_type.split("(")[0].upper()
     return "measure" if base in _NUMERIC_TYPES else "dimension"
 
 
-def _to_table(dataset: dict) -> Table:
-    name = dataset["name"]
-    label, desc = _LABELS.get(name, (name, "来自 data 服务的真实数据集"))
-    schema = data_service.get_schema(dataset["id"])
-    columns = [Column(c["name"], c["name"], _column_kind(c["name"], c["data_type"])) for c in schema]
-    rows = data_service.preview(dataset["id"], _PREVIEW_ROWS)["rows"]
-    row_count = dataset.get("row_count") or len(rows)
-    if len(rows) < row_count:
-        desc = f"{desc}，展示前 {len(rows)} / {row_count} 行"
-    return Table(name=name, label=label, desc=desc, columns=columns, rows=rows)
+def _to_table(summary: dict) -> Table:
+    detail = ontology_service.get_object_type(summary["id"])
+    columns = [
+        Column(p["name"], p["name"], _column_kind(p["name"], p["data_type"], p["is_primary_key"]))
+        for p in detail.get("properties", [])
+    ]
+    rows = ontology_service.list_objects(summary["id"], _PREVIEW_ROWS)["rows"]
+    label = summary["display_name"]
+    desc = summary.get("description") or f"本体对象类型「{label}」"
+    return Table(name=summary["api_name"], label=label, desc=desc, columns=columns, rows=rows)
 
 
 class DataProvider(Protocol):
@@ -72,22 +61,23 @@ class MockProvider:
         return table
 
 
-class DataServiceProvider:
+class OntologyProvider:
     def list_tables(self) -> list[Table]:
         try:
-            datasets = data_service.list_datasets()
+            summaries = ontology_service.list_object_types()
         except httpx.HTTPError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "data 服务不可用") from exc
-        return [_to_table(d) for d in datasets]
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "本体服务不可用") from exc
+        return [_to_table(s) for s in summaries]
 
     def get_table(self, name: str) -> Table:
         try:
-            dataset = data_service.find_dataset(name)
+            summaries = ontology_service.list_object_types()
         except httpx.HTTPError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "data 服务不可用") from exc
-        if dataset is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Table '{name}' not found")
-        return _to_table(dataset)
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "本体服务不可用") from exc
+        for s in summaries:
+            if name in (s["api_name"], s["display_name"], s["id"]):
+                return _to_table(s)
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"对象类型 '{name}' 不存在")
 
 
-provider: DataProvider = DataServiceProvider()
+provider: DataProvider = OntologyProvider()

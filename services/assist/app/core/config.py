@@ -18,8 +18,9 @@ class Settings(BaseSettings):
     llm_display_name: str = "DeepSeek V4 Flash"
     llm_timeout_seconds: float = 120.0
 
-    # Data service (dataset catalog / schema / preview tools).
-    data_service_url: str = "http://localhost:8000"
+    # Ontology service — the agent's tools query built object types, not raw
+    # datasets. 127.0.0.1 (not localhost) avoids Windows' ~2s IPv6 resolution.
+    ontology_service_url: str = "http://127.0.0.1:8003"
 
     log_level: str = "INFO"
 

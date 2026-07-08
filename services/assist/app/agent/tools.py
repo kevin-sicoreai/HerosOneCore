@@ -1,8 +1,8 @@
-"""Agent tools.
+"""Agent tools — all backed by the built ontology (object types + instances).
 
-Device/object tools use mock ontology data for now (aligned with the frontend
-prototype); they swap to the ontology service once its read API exists.
-Dataset tools call the real data service.
+The agent operates on the ontology semantic layer, not on raw datasets:
+list object types, inspect an object type's properties, and search its
+real instances (virtualized from the data plane).
 """
 
 import json
@@ -10,147 +10,100 @@ import json
 import httpx
 from langchain_core.tools import tool
 
-from app.clients import data_service
+from app.clients import ontology_service
 
-DEVICES: list[dict] = [
-    {"id": "DV-10231", "model": "TX-500", "site": "华东-01", "status": "告警", "failure_rate": 8.4, "last_seen": "2 分钟前"},
-    {"id": "DV-10232", "model": "TX-500", "site": "华东-01", "status": "运行", "failure_rate": 1.2, "last_seen": "1 分钟前"},
-    {"id": "DV-10240", "model": "GX-220", "site": "华南-03", "status": "告警", "failure_rate": 7.9, "last_seen": "5 分钟前"},
-    {"id": "DV-10255", "model": "TX-500", "site": "华北-02", "status": "停机", "failure_rate": 12.1, "last_seen": "1 小时前"},
-    {"id": "DV-10261", "model": "GX-220", "site": "华南-03", "status": "运行", "failure_rate": 0.6, "last_seen": "刚刚"},
-    {"id": "DV-10277", "model": "MX-900", "site": "西南-01", "status": "告警", "failure_rate": 6.5, "last_seen": "8 分钟前"},
-    {"id": "DV-10288", "model": "MX-900", "site": "西南-01", "status": "运行", "failure_rate": 2.3, "last_seen": "3 分钟前"},
-]
+_UNAVAILABLE = json.dumps({"error": "本体服务不可用，无法查询对象类型"}, ensure_ascii=False)
+
+# Cap how many instances a single search pulls (the ontology API caps at 1000).
+_SEARCH_LIMIT = 200
 
 
 @tool
-def search_objects(object_type: str, keyword: str = "") -> str:
-    """检索本体对象实例。
-
-    Args:
-        object_type: 对象类型，目前支持「设备」(device)。
-        keyword: 可选过滤词，匹配设备 ID / 型号 / 站点 / 状态。
+def list_object_types() -> str:
+    """列出平台上已建模的本体对象类型（构建后的语义层，非原始数据集）。
 
     Returns:
-        JSON：{"object_type", "total", "rows", "source"}。
-    """
-    rows = DEVICES
-    if keyword:
-        kw = keyword.lower()
-        rows = [
-            d for d in DEVICES
-            if kw in d["id"].lower() or kw in d["model"].lower() or kw in d["site"] or kw in d["status"]
-        ]
-    return json.dumps(
-        {"object_type": "设备", "total": len(rows), "rows": rows, "source": "设备对象"},
-        ensure_ascii=False,
-    )
-
-
-@tool
-def aggregate_failure_rate(days: int = 30, group_by: str = "model") -> str:
-    """聚合近 N 天的设备故障率，找出风险最高的设备。
-
-    Args:
-        days: 统计窗口天数，默认 30。
-        group_by: 分组维度，"model"（型号）或 "site"（站点）。
-
-    Returns:
-        JSON：{"days", "group_by", "groups", "top_risk", "source"}。
-    """
-    key = "site" if group_by == "site" else "model"
-    groups: dict[str, list[float]] = {}
-    for d in DEVICES:
-        groups.setdefault(d[key], []).append(d["failure_rate"])
-    aggregated = [
-        {key: k, "avg_failure_rate": round(sum(v) / len(v), 2), "device_count": len(v)}
-        for k, v in sorted(groups.items(), key=lambda kv: -sum(kv[1]) / len(kv[1]))
-    ]
-    top = sorted(DEVICES, key=lambda d: -d["failure_rate"])[:3]
-    return json.dumps(
-        {"days": days, "group_by": key, "groups": aggregated, "top_risk": top, "source": "pipeline_maintenance"},
-        ensure_ascii=False,
-    )
-
-
-_DATA_UNAVAILABLE = json.dumps(
-    {"error": "data 服务不可用，无法查询数据集"}, ensure_ascii=False
-)
-
-
-@tool
-def list_datasets() -> str:
-    """列出平台上已接入的真实数据集（来自 data 服务）。
-
-    Returns:
-        JSON：{"total", "datasets": [{"id", "name", "row_count", "last_synced_at"}], "source"}。
+        JSON：{"total", "object_types": [{"api_name", "display_name", "primary_key"}], "source"}。
     """
     try:
-        datasets = data_service.list_datasets()
+        types = ontology_service.list_object_types()
     except httpx.HTTPError:
-        return _DATA_UNAVAILABLE
+        return _UNAVAILABLE
     return json.dumps(
         {
-            "total": len(datasets),
-            "datasets": [
+            "total": len(types),
+            "object_types": [
                 {
-                    "id": d.get("id"),
-                    "name": d.get("name"),
-                    "row_count": d.get("row_count"),
-                    "last_synced_at": d.get("last_synced_at"),
+                    "api_name": t.get("api_name"),
+                    "display_name": t.get("display_name"),
+                    "primary_key": t.get("primary_key"),
                 }
-                for d in datasets
+                for t in types
             ],
-            "source": "数据集目录",
+            "source": "本体",
         },
         ensure_ascii=False,
     )
 
 
 @tool
-def get_dataset_schema(dataset: str) -> str:
-    """查看某个数据集的表结构（列名与类型）。dataset 传数据集名称或 ID。
+def get_object_type_schema(object_type: str) -> str:
+    """查看某个本体对象类型的属性（字段与类型）。object_type 传显示名 / API 名 / ID。
 
     Returns:
-        JSON：{"dataset", "columns": [{"name", "data_type", "nullable"}], "source"}。
+        JSON：{"object_type", "properties": [{"name", "data_type", "is_primary_key"}], "source"}。
     """
     try:
-        found = data_service.find_dataset(dataset)
+        found = ontology_service.find_object_type(object_type)
         if found is None:
-            return json.dumps({"error": f"数据集 '{dataset}' 不存在"}, ensure_ascii=False)
-        columns = data_service.get_schema(found["id"])
+            return json.dumps({"error": f"对象类型 '{object_type}' 不存在"}, ensure_ascii=False)
+        detail = ontology_service.get_object_type(found["id"])
     except httpx.HTTPError:
-        return _DATA_UNAVAILABLE
+        return _UNAVAILABLE
     return json.dumps(
-        {"dataset": found["name"], "columns": columns, "source": found["name"]},
+        {
+            "object_type": detail["display_name"],
+            "properties": [
+                {"name": p["name"], "data_type": p["data_type"], "is_primary_key": p["is_primary_key"]}
+                for p in detail.get("properties", [])
+            ],
+            "source": detail["display_name"],
+        },
         ensure_ascii=False,
     )
 
 
 @tool
-def preview_dataset(dataset: str, limit: int = 10) -> str:
-    """预览某个数据集的前若干行真实数据。dataset 传数据集名称或 ID，limit 默认 10（最大 50）。
+def search_objects(object_type: str, keyword: str = "") -> str:
+    """检索某个本体对象类型的真实实例，可选关键词过滤（匹配任意字段）。
+
+    object_type 传显示名 / API 名 / ID；keyword 为空则返回前若干条。
 
     Returns:
-        JSON：{"dataset", "columns", "rows", "source"}。
+        JSON：{"object_type", "total", "columns", "rows", "source"}。
     """
     try:
-        found = data_service.find_dataset(dataset)
+        found = ontology_service.find_object_type(object_type)
         if found is None:
-            return json.dumps({"error": f"数据集 '{dataset}' 不存在"}, ensure_ascii=False)
-        data = data_service.preview(found["id"], min(max(limit, 1), 50))
+            return json.dumps({"error": f"对象类型 '{object_type}' 不存在"}, ensure_ascii=False)
+        data = ontology_service.list_objects(found["id"], _SEARCH_LIMIT)
     except httpx.HTTPError:
-        return _DATA_UNAVAILABLE
+        return _UNAVAILABLE
+    rows = data.get("rows", [])
+    if keyword:
+        kw = keyword.lower()
+        rows = [r for r in rows if any(kw in str(v).lower() for v in r.values())]
     return json.dumps(
         {
-            "dataset": found["name"],
+            "object_type": found["display_name"],
+            "total": len(rows),
             "columns": data.get("columns", []),
-            "rows": data.get("rows", []),
-            "source": found["name"],
+            "rows": rows[:50],
+            "source": found["display_name"],
         },
         ensure_ascii=False,
         default=str,
     )
 
 
-AGENT_TOOLS = [search_objects, aggregate_failure_rate, list_datasets, get_dataset_schema, preview_dataset]
+AGENT_TOOLS = [list_object_types, get_object_type_schema, search_objects]

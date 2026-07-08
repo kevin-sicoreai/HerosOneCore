@@ -36,9 +36,9 @@ const TRACE_ICON: Record<TraceIcon, React.ElementType> = {
 }
 
 const SUGGESTIONS = [
-  "哪些设备近30天故障率上升？",
-  "各站点的平均故障率对比",
-  "TX-500 型号设备目前状态如何？",
+  "平台上有哪些本体对象类型？",
+  "客户 Customer 有哪些属性？",
+  "查一下供应商 Supplier 的数据",
 ]
 
 type UIMessage = {
@@ -316,23 +316,6 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
           {m.error && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-500">
               请求出错：{m.error}
-            </div>
-          )}
-
-          {/* Inline result: object cards */}
-          {m.extras && m.extras.devices.length > 0 && (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {m.extras.devices.map((d) => (
-                <button
-                  key={d.id}
-                  onClick={() => open({ name: d.id, kind: "设备对象" })}
-                  className="rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-emerald-500/40"
-                >
-                  <div className="font-mono text-sm text-emerald-500">{d.id}</div>
-                  <div className="text-xs text-muted-foreground">{d.model} · {d.site}</div>
-                  <div className="mt-1 text-lg font-semibold text-red-500">{d.failureRate}%</div>
-                </button>
-              ))}
             </div>
           )}
 
