@@ -12,7 +12,6 @@ import {
 } from "lucide-react"
 
 import { governanceApi, type AuditEntry, type Lineage, type Role } from "@/lib/governance-api"
-import { AUDIT, GRANTS, LINEAGE } from "@/lib/mock"
 import { Badge } from "@/components/ui/badge"
 import {
   Sheet,
@@ -23,7 +22,10 @@ import {
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-type ResourceRef = { name: string; kind?: string }
+// lineageKey: lineage and audit are type/dataset-level, not per-instance, so an
+// object drawer passes its object *type* name here to match the governance graph
+// (the title still shows `name`, the instance). Omitted → match by `name`.
+type ResourceRef = { name: string; kind?: string; lineageKey?: string }
 
 type Ctx = {
   open: (r: ResourceRef) => void
@@ -67,38 +69,44 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
       .catch(() => {})
   }, [open, resource])
 
-  // --- lineage: upstream (incoming edges) and downstream (outgoing edges) are
-  //     both computed from the real platform lineage graph.
-  const node = lineage.nodes.find((n) => n.label === resource?.name)
-  const realUpstream = node
+  // Governance data is matched by the type/dataset key (lineageKey) when given,
+  // else the resource's own name. Lineage/audit are type-level, so an instance
+  // resolves against its object type. No mock fallback — show real data or empty.
+  const govKey = resource?.lineageKey ?? resource?.name
+
+  // --- lineage: upstream (incoming edges) and downstream (outgoing edges) ---
+  const node = lineage.nodes.find((n) => n.label === govKey)
+  const upstreamItems = node
     ? lineage.edges
         .filter((e) => e.to_id === node.id)
         .map((e) => lineage.nodes.find((n) => n.id === e.from_id)?.label)
         .filter((x): x is string => !!x)
     : []
-  const realDownstream = node
+  const downstreamItems = node
     ? lineage.edges
         .filter((e) => e.from_id === node.id)
         .map((e) => lineage.nodes.find((n) => n.id === e.to_id)?.label)
         .filter((x): x is string => !!x)
     : []
-  const upstreamItems = realUpstream.length ? realUpstream : LINEAGE.upstream
-  const downstreamItems = realDownstream.length ? realDownstream : LINEAGE.downstream
 
-  // --- access: real roles, else mock ---
-  const accessRows = roles.length
-    ? roles.map((r) => ({ role: r.name, members: r.members, read: r.can_read, write: r.can_write, admin: r.can_admin }))
-    : GRANTS
+  // --- access: real platform roles ---
+  const accessRows = roles.map((r) => ({
+    role: r.name,
+    members: r.members,
+    read: r.can_read,
+    write: r.can_write,
+    admin: r.can_admin,
+  }))
 
-  // --- audit: real (prefer entries about this resource), else mock ---
-  const forResource = audit.filter((a) => a.target === resource?.name)
-  const auditRows = audit.length
-    ? (forResource.length ? forResource : audit).slice(0, 10).map((a) => ({
-        action: a.action,
-        sub: `${a.source} · ${a.target}`,
-        time: a.time ? a.time.slice(0, 19).replace("T", " ") : "",
-      }))
-    : AUDIT.map((a) => ({ action: a.action, sub: `${a.user} · ${a.target}`, time: a.time }))
+  // --- audit: real entries about this resource/type ---
+  const auditRows = audit
+    .filter((a) => a.target === govKey)
+    .slice(0, 10)
+    .map((a) => ({
+      action: a.action,
+      sub: `${a.source} · ${a.target}`,
+      time: a.time ? a.time.slice(0, 19).replace("T", " ") : "",
+    }))
 
   return (
     <ResourceDrawerContext.Provider value={api}>
@@ -130,18 +138,25 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
               </TabsList>
 
               <TabsContent value="lineage" className="pt-3">
-                <div className="space-y-3">
-                  <LineageBlock title="上游" items={upstreamItems} />
-                  <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium">
-                    <GitCommitVerticalIcon className="size-4 text-emerald-500" />
-                    {resource?.name ?? LINEAGE.node}
+                {node ? (
+                  <div className="space-y-3">
+                    <LineageBlock title="上游" items={upstreamItems} />
+                    <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium">
+                      <GitCommitVerticalIcon className="size-4 text-emerald-500" />
+                      {node.label}
+                    </div>
+                    <LineageBlock title="下游" items={downstreamItems} />
                   </div>
-                  <LineageBlock title="下游" items={downstreamItems} />
-                </div>
+                ) : (
+                  <div className="py-8 text-center text-sm text-muted-foreground">暂无血缘信息</div>
+                )}
               </TabsContent>
 
               <TabsContent value="access" className="pt-3">
                 <div className="space-y-2">
+                  {accessRows.length === 0 && (
+                    <div className="py-8 text-center text-sm text-muted-foreground">暂无角色权限信息</div>
+                  )}
                   {accessRows.map((g) => (
                     <div
                       key={g.role}
@@ -165,6 +180,9 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
               </TabsContent>
 
               <TabsContent value="audit" className="pt-3">
+                {auditRows.length === 0 && (
+                  <div className="py-8 text-center text-sm text-muted-foreground">暂无审计记录</div>
+                )}
                 <ol className="relative space-y-4 border-l border-border pl-4">
                   {auditRows.map((a, i) => (
                     <li key={i} className="relative">

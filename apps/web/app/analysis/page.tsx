@@ -181,12 +181,14 @@ export default function AnalysisPage() {
     setView("table")
   }
 
-  // Enter an object type's detail set from the ontology graph.
+  // Click a type node in the ontology overview: select that object type and jump
+  // to its table (aggregation) analysis.
   function selectTypeFromGraph(node: GraphNode) {
     const t = tables.find((x) => x.name === node.api_name)
-    if (!t) return
-    selectTable(t)
-    setView("table")
+    if (t) {
+      selectTable(t)
+      setView("table")
+    }
   }
 
   return (

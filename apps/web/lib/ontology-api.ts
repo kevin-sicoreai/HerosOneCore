@@ -92,6 +92,12 @@ export const ontologyApi = {
     req<void>(`/object-types/${id}`, { method: "DELETE" }),
   objects: (id: string, limit = 20) =>
     req<ObjectList>(`/object-types/${id}/objects?limit=${limit}`),
+  // Traverse one link from a specific object instance; returns the peer type's
+  // instances (object_type_id is the peer type's id).
+  linked: (objectTypeId: string, pkValue: string | number, linkTypeId: string, limit = 8) =>
+    req<ObjectList>(
+      `/object-types/${objectTypeId}/objects/${encodeURIComponent(String(pkValue))}/linked/${linkTypeId}?limit=${limit}`
+    ),
   createLink: (p: CreateLink) =>
     req<GraphLink>("/link-types", { method: "POST", body: JSON.stringify(p) }),
   deleteLink: (id: string) => req<void>(`/link-types/${id}`, { method: "DELETE" }),
