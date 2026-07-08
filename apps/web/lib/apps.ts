@@ -1,14 +1,10 @@
 import {
-  ActivityIcon,
-  BlocksIcon,
   BotIcon,
   BoxesIcon,
   DatabaseIcon,
   RadarIcon,
-  ServerIcon,
   Share2Icon,
   ShieldCheckIcon,
-  StoreIcon,
   WorkflowIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -41,13 +37,6 @@ export const APP_LAYERS: AppLayer[] = [
         icon: BotIcon,
         desc: "对话式助手，展示检索与推理全过程",
       },
-      {
-        key: "marketplace",
-        title: "应用市场",
-        href: "/marketplace",
-        icon: StoreIcon,
-        desc: "预置 + 自建 AI 应用",
-      },
     ],
   },
   {
@@ -67,13 +56,6 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/explorer",
         icon: BoxesIcon,
         desc: "浏览本体对象实例",
-      },
-      {
-        key: "app-builder",
-        title: "应用构建器",
-        href: "/app-builder",
-        icon: BlocksIcon,
-        desc: "低代码搭建业务应用",
       },
     ],
   },
@@ -105,19 +87,6 @@ export const APP_LAYERS: AppLayer[] = [
     ],
   },
   {
-    key: "platform",
-    label: "平台",
-    apps: [
-      {
-        key: "apollo",
-        title: "运维控制台",
-        href: "/apollo",
-        icon: ServerIcon,
-        desc: "Apollo 部署与服务网格",
-      },
-    ],
-  },
-  {
     key: "governance",
     label: "安全与治理",
     apps: [
@@ -137,5 +106,3 @@ export const ALL_APPS: AppDef[] = APP_LAYERS.flatMap((l) => l.apps)
 export function findApp(href: string): AppDef | undefined {
   return ALL_APPS.find((a) => a.href === href)
 }
-
-export { ActivityIcon }

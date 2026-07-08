@@ -217,25 +217,6 @@ export const ASSIST_SESSIONS = [
   { id: "s3", title: "上季度华东区订单履约率", time: "昨天" },
 ]
 
-// ---------- Marketplace ----------
-export type MarketApp = {
-  id: string
-  name: string
-  desc: string
-  tag: "prebuilt" | "custom"
-  category: string
-  installs: string
-}
-
-export const MARKET_APPS: MarketApp[] = [
-  { id: "m1", name: "预测性维护", desc: "基于传感器数据预测设备故障", tag: "prebuilt", category: "运营", installs: "1.2k" },
-  { id: "m2", name: "供应链风险雷达", desc: "多级供应商风险实时监控", tag: "prebuilt", category: "供应链", installs: "860" },
-  { id: "m3", name: "反欺诈调查台", desc: "实体关联 + 资金流图谱", tag: "prebuilt", category: "调查", installs: "540" },
-  { id: "m4", name: "运营指挥台", desc: "本组织自建的实时运营看板", tag: "custom", category: "自建", installs: "内部" },
-  { id: "m5", name: "客户 360", desc: "跨系统客户全景视图", tag: "prebuilt", category: "营销", installs: "2.1k" },
-  { id: "m6", name: "调查看板", desc: "案件专用关系与时间线视图", tag: "custom", category: "自建", installs: "内部" },
-]
-
 // ---------- Data connectors ----------
 export type Connector = {
   id: string
@@ -281,22 +262,6 @@ export const PIPE_EDGES = [
   { from: "n3", to: "n5" },
   { from: "n4", to: "n5" },
   { from: "n5", to: "n6" },
-]
-
-// ---------- Apollo ----------
-export type Service = {
-  name: string
-  status: "健康" | "降级" | "故障"
-  cpu: number
-  mem: number
-  version: string
-}
-export const SERVICES: Service[] = [
-  { name: "ontology-service", status: "健康", cpu: 42, mem: 61, version: "v2.14.3" },
-  { name: "pipeline-runner", status: "健康", cpu: 68, mem: 55, version: "v2.14.3" },
-  { name: "aip-gateway", status: "降级", cpu: 88, mem: 79, version: "v2.15.0" },
-  { name: "object-storage", status: "健康", cpu: 33, mem: 40, version: "v2.14.1" },
-  { name: "auth-service", status: "健康", cpu: 21, mem: 30, version: "v2.14.3" },
 ]
 
 // ---------- Governance ----------
