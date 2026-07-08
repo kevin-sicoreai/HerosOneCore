@@ -37,7 +37,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ResourceDrawerProvider>
         <SidebarProvider>
           <AppSidebar />
-          <SidebarInset className="min-w-0 overflow-hidden">
+          {/* h-svh caps the inset at the viewport so the content area scrolls
+              internally — pages with a pinned footer (e.g. the assist input) stay
+              visible instead of being pushed below the fold as content grows. */}
+          <SidebarInset className="h-svh min-w-0 overflow-hidden">
             <TopBar />
             <div className="min-h-0 flex-1 overflow-auto">{children}</div>
           </SidebarInset>

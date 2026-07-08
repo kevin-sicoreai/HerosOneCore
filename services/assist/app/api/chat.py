@@ -189,5 +189,7 @@ async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)
     return StreamingResponse(
         gen(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        # no-transform stops the Next.js dev proxy from gzip-compressing the
+        # stream — compression buffers the whole body and kills token streaming.
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
