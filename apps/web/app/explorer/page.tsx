@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 
 import { ontologyApi, type GraphNode, type OntologyGraph } from "@/lib/ontology-api"
+import { fieldLabel } from "@/lib/field-labels"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
@@ -238,7 +239,7 @@ function InstanceList({
                 <tr className="border-b border-border">
                   {columns.map((c) => (
                     <th key={c} className="px-3 py-2 text-left font-medium">
-                      {c}
+                      {fieldLabel(c)}
                     </th>
                   ))}
                 </tr>
@@ -370,7 +371,7 @@ function ObjectView({
                   key={k}
                   className="flex items-center justify-between gap-3 border-b border-border/40 py-1 text-sm"
                 >
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{k}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{fieldLabel(k)}</span>
                   <span className="truncate text-right">
                     {v === null || v === undefined ? "—" : String(v)}
                   </span>
