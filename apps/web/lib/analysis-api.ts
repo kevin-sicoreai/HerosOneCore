@@ -41,8 +41,10 @@ export type AnalyzeRequest = {
 }
 
 export type AnalyzeResult = {
+  mode: "aggregate" | "detail"
   columns: string[]
-  rows: Array<{ group: string } & Record<string, number | string>>
+  // aggregate: { group, m0, ... }; detail: raw record keyed by column name.
+  rows: Array<Record<string, number | string | null>>
   totals: number[]
   matched_rows: number
 }

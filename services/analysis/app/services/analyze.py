@@ -62,6 +62,16 @@ def run(table: Table, req: AnalyzeRequest) -> AnalyzeResult:
 
     rows = [r for r in table.rows if all(_matches(r, f) for f in req.filters)]
 
+    # Detail mode: no metrics -> return the filtered rows as-is, all columns.
+    if not req.metrics:
+        return AnalyzeResult(
+            mode="detail",
+            columns=[c.label for c in table.columns],
+            rows=rows,
+            totals=[],
+            matched_rows=len(rows),
+        )
+
     def metric_label(m: MetricSpec) -> str:
         base = columns_by_name[m.field].label if m.field in columns_by_name else m.field
         return f"{base}·{AGG_LABEL[m.agg]}" if m.agg != "count" else "记录数"

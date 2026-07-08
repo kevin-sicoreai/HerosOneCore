@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ColumnOut(BaseModel):
@@ -33,16 +33,19 @@ class FilterSpec(BaseModel):
 class AnalyzeRequest(BaseModel):
     table: str
     group_by: str | None = None
-    metrics: list[MetricSpec] = Field(min_length=1)
+    # Empty metrics = detail mode: return the filtered rows as-is (no aggregation).
+    metrics: list[MetricSpec] = []
     filters: list[FilterSpec] = []
     limit: int = 50
 
 
 class AnalyzeResult(BaseModel):
-    # Column headers: the group label (if grouping) then one per metric.
+    # "aggregate": grouped/summed; "detail": raw filtered rows.
+    mode: str = "aggregate"
+    # Aggregate: group label (if grouping) then one per metric. Detail: column labels.
     columns: list[str]
-    # One row per group: {"group": ..., "m0": ..., "m1": ...}
+    # Aggregate: one row per group {"group", "m0", ...}. Detail: raw records keyed by column name.
     rows: list[dict[str, Any]]
-    # Ungrouped totals per metric, for the headline cards.
+    # Ungrouped totals per metric (empty in detail mode).
     totals: list[float]
     matched_rows: int

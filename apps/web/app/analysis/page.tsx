@@ -54,8 +54,11 @@ const OP_OPTIONS: { value: FilterOp; label: string }[] = [
   { value: "contains", label: "包含" },
 ]
 
-const SELECT_CLASS =
-  "w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-sm outline-none focus:border-emerald-500/60"
+const SELECT_BASE =
+  "rounded-md border border-border bg-transparent px-2 py-1.5 text-sm outline-none focus:border-emerald-500/60"
+// Full-width variant for single-column selects. Fixed/flex selects use
+// SELECT_BASE directly to avoid a w-full vs w-* class conflict.
+const SELECT_CLASS = `w-full ${SELECT_BASE}`
 
 function formatValue(v: number | string): string {
   if (typeof v !== "number") return String(v)
@@ -90,23 +93,23 @@ export default function AnalysisPage() {
   }, [])
 
   function selectTable(t: AnalysisTable) {
-    const dims = t.columns.filter((c) => c.kind === "dimension" && c.name !== "id")
-    const meas = t.columns.filter((c) => c.kind === "measure")
     setTableName(t.name)
-    setGroupBy(dims[0]?.name ?? "")
-    setMetrics(meas[0] ? [{ field: meas[0].name, agg: "avg" }] : [])
+    // Default to detail mode: no grouping, no measure — show all rows as-is.
+    setGroupBy("")
+    setMetrics([])
     setFilters([])
     setResult(null)
   }
 
-  // Auto-run on any config change (debounced).
+  // Auto-run on any config change (debounced). No metrics = detail mode:
+  // the service returns the filtered rows as-is.
   React.useEffect(() => {
-    if (!tableName || metrics.length === 0) return
+    if (!tableName) return
     const timer = window.setTimeout(() => {
       analysisApi
         .analyze({
           table: tableName,
-          group_by: groupBy || null,
+          group_by: metrics.length === 0 ? null : groupBy || null,
           metrics,
           filters: filters.filter((f) => String(f.value).trim() !== ""),
         })
@@ -154,7 +157,7 @@ export default function AnalysisPage() {
       {isAgg ? (
         <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr] gap-4">
           {/* Config panel */}
-          <div className="space-y-4 overflow-auto rounded-xl border border-border bg-card p-4">
+          <div className="space-y-4 overflow-x-hidden overflow-y-auto rounded-xl border border-border bg-card p-4">
             <div>
               <div className="mb-1 text-xs text-muted-foreground">数据表</div>
               <select
@@ -176,7 +179,12 @@ export default function AnalysisPage() {
 
             <div>
               <div className="mb-1 text-xs text-muted-foreground">分组维度</div>
-              <select className={SELECT_CLASS} value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
+              <select
+                className={`${SELECT_CLASS} disabled:opacity-50`}
+                value={groupBy}
+                disabled={metrics.length === 0}
+                onChange={(e) => setGroupBy(e.target.value)}
+              >
                 <option value="">不分组（整体汇总）</option>
                 {dimensions.map((d) => (
                   <option key={d.name} value={d.name}>
@@ -184,6 +192,9 @@ export default function AnalysisPage() {
                   </option>
                 ))}
               </select>
+              {metrics.length === 0 && (
+                <div className="mt-1 text-xs text-muted-foreground">明细模式下不分组</div>
+              )}
             </div>
 
             <div>
@@ -204,7 +215,7 @@ export default function AnalysisPage() {
                 {metrics.map((m, i) => (
                   <div key={i} className="flex items-center gap-1.5">
                     <select
-                      className={SELECT_CLASS}
+                      className={`${SELECT_BASE} min-w-0 flex-1`}
                       value={m.field}
                       onChange={(e) =>
                         setMetrics((all) => all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
@@ -217,7 +228,7 @@ export default function AnalysisPage() {
                       ))}
                     </select>
                     <select
-                      className={`${SELECT_CLASS} w-24 shrink-0`}
+                      className={`${SELECT_BASE} w-24 shrink-0`}
                       value={m.agg}
                       onChange={(e) =>
                         setMetrics((all) =>
@@ -231,17 +242,18 @@ export default function AnalysisPage() {
                         </option>
                       ))}
                     </select>
-                    {metrics.length > 1 && (
-                      <button
-                        onClick={() => setMetrics((all) => all.filter((_, j) => j !== i))}
-                        className="text-muted-foreground hover:text-red-500"
-                        aria-label="删除度量"
-                      >
-                        <XIcon className="size-4" />
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setMetrics((all) => all.filter((_, j) => j !== i))}
+                      className="shrink-0 text-muted-foreground hover:text-red-500"
+                      aria-label="删除度量"
+                    >
+                      <XIcon className="size-4" />
+                    </button>
                   </div>
                 ))}
+                {metrics.length === 0 && (
+                  <div className="text-xs text-muted-foreground">无度量 · 显示全部明细数据</div>
+                )}
               </div>
             </div>
 
@@ -262,9 +274,9 @@ export default function AnalysisPage() {
               <div className="space-y-1.5">
                 {filters.length === 0 && <div className="text-xs text-muted-foreground">无</div>}
                 {filters.map((f, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
+                  <div key={i} className="space-y-1.5 rounded-md border border-border/60 p-1.5">
                     <select
-                      className={`${SELECT_CLASS} w-24 shrink-0`}
+                      className={SELECT_CLASS}
                       value={f.field}
                       onChange={(e) =>
                         setFilters((all) => all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
@@ -276,35 +288,38 @@ export default function AnalysisPage() {
                         </option>
                       ))}
                     </select>
-                    <select
-                      className={`${SELECT_CLASS} w-16 shrink-0`}
-                      value={f.op}
-                      onChange={(e) =>
-                        setFilters((all) =>
-                          all.map((x, j) => (j === i ? { ...x, op: e.target.value as FilterOp } : x))
-                        )
-                      }
-                    >
-                      {OP_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <Input
-                      value={f.value}
-                      placeholder="值"
-                      onChange={(e) =>
-                        setFilters((all) => all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
-                      }
-                    />
-                    <button
-                      onClick={() => setFilters((all) => all.filter((_, j) => j !== i))}
-                      className="text-muted-foreground hover:text-red-500"
-                      aria-label="删除过滤"
-                    >
-                      <XIcon className="size-4" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        className={`${SELECT_BASE} w-16 shrink-0`}
+                        value={f.op}
+                        onChange={(e) =>
+                          setFilters((all) =>
+                            all.map((x, j) => (j === i ? { ...x, op: e.target.value as FilterOp } : x))
+                          )
+                        }
+                      >
+                        {OP_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <Input
+                        className="min-w-0 flex-1"
+                        value={f.value}
+                        placeholder="值"
+                        onChange={(e) =>
+                          setFilters((all) => all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
+                        }
+                      />
+                      <button
+                        onClick={() => setFilters((all) => all.filter((_, j) => j !== i))}
+                        className="shrink-0 text-muted-foreground hover:text-red-500"
+                        aria-label="删除过滤"
+                      >
+                        <XIcon className="size-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -320,15 +335,18 @@ export default function AnalysisPage() {
           {/* Results */}
           <div className="flex min-h-0 flex-col gap-3">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              {result?.columns.slice(1).map((label, i) => (
-                <div key={label} className="rounded-lg border border-border bg-card p-3">
-                  <div className="text-xs text-muted-foreground">{label}</div>
-                  <div className="text-xl font-semibold">{formatValue(result.totals[i])}</div>
-                </div>
-              ))}
+              {result?.mode === "aggregate" &&
+                result.columns.slice(1).map((label, i) => (
+                  <div key={label} className="rounded-lg border border-border bg-card p-3">
+                    <div className="text-xs text-muted-foreground">{label}</div>
+                    <div className="text-xl font-semibold">{formatValue(result.totals[i])}</div>
+                  </div>
+                ))}
               {result && (
                 <div className="rounded-lg border border-border bg-card p-3">
-                  <div className="text-xs text-muted-foreground">命中记录</div>
+                  <div className="text-xs text-muted-foreground">
+                    {result.mode === "detail" ? "明细记录" : "命中记录"}
+                  </div>
                   <div className="text-xl font-semibold">{formatValue(result.matched_rows)}</div>
                 </div>
               )}
@@ -340,7 +358,7 @@ export default function AnalysisPage() {
                   {offline ? "分析服务未启动" : "配置左侧参数开始分析"}
                 </div>
               ) : (
-                <ResultTable result={result} />
+                <ResultTable result={result} table={table} />
               )}
             </div>
           </div>
@@ -356,7 +374,36 @@ export default function AnalysisPage() {
   )
 }
 
-function ResultTable({ result }: { result: AnalyzeResult }) {
+function ResultTable({ result, table }: { result: AnalyzeResult; table: AnalysisTable | null }) {
+  // Detail mode: raw filtered rows, one column per object-type property.
+  if (result.mode === "detail") {
+    const cols = table?.columns ?? []
+    return (
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
+          <tr className="border-b border-border">
+            {cols.map((c) => (
+              <th key={c.name} className="px-4 py-2 text-left font-medium">
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {result.rows.map((r, ri) => (
+            <tr key={ri} className="border-b border-border/60 hover:bg-muted/50">
+              {cols.map((c) => (
+                <td key={c.name} className="px-4 py-2">
+                  {formatValue((r[c.name] ?? "") as number | string)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+
   return (
     <table className="w-full text-sm">
       <thead className="text-xs text-muted-foreground">
@@ -370,8 +417,8 @@ function ResultTable({ result }: { result: AnalyzeResult }) {
       </thead>
       <tbody>
         {result.rows.map((r) => (
-          <tr key={r.group} className="border-b border-border/60 hover:bg-muted/50">
-            <td className="px-4 py-2">{r.group}</td>
+          <tr key={r.group as string} className="border-b border-border/60 hover:bg-muted/50">
+            <td className="px-4 py-2">{r.group as string}</td>
             {result.columns.slice(1).map((c, i) => (
               <td key={c} className={`px-4 py-2 ${i === result.columns.length - 2 ? "text-right" : ""}`}>
                 {formatValue(r[`m${i}`] as number)}
