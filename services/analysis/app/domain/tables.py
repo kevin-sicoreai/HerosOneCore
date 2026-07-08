@@ -15,6 +15,7 @@ class Column:
     name: str
     label: str
     kind: str  # dimension | measure
+    data_type: str | None = None  # source SQL type (e.g. DATE, VARCHAR); None for built-in mock
 
 
 @dataclass(frozen=True)

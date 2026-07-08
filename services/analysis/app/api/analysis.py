@@ -15,7 +15,10 @@ def _table_out(t) -> TableOut:
         label=t.label,
         desc=t.desc,
         row_count=len(t.rows),
-        columns=[ColumnOut(name=c.name, label=c.label, kind=c.kind) for c in t.columns],
+        columns=[
+            ColumnOut(name=c.name, label=c.label, kind=c.kind, data_type=c.data_type)
+            for c in t.columns
+        ],
     )
 
 

@@ -8,6 +8,7 @@ export type AnalysisColumn = {
   name: string
   label: string
   kind: "dimension" | "measure"
+  data_type?: string | null
 }
 
 export type AnalysisTable = {

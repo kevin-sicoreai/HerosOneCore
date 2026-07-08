@@ -35,7 +35,12 @@ def _column_kind(name: str, data_type: str, is_primary_key: bool) -> str:
 def _to_table(summary: dict) -> Table:
     detail = ontology_service.get_object_type(summary["id"])
     columns = [
-        Column(p["name"], p["name"], _column_kind(p["name"], p["data_type"], p["is_primary_key"]))
+        Column(
+            p["name"],
+            p["name"],
+            _column_kind(p["name"], p["data_type"], p["is_primary_key"]),
+            p["data_type"],
+        )
         for p in detail.get("properties", [])
     ]
     rows = ontology_service.list_objects(summary["id"], _PREVIEW_ROWS)["rows"]

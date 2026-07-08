@@ -7,6 +7,7 @@ import {
   MapIcon,
   PlusIcon,
   RadarIcon,
+  Share2Icon,
   TableIcon,
   WaypointsIcon,
   WifiOffIcon,
@@ -15,6 +16,7 @@ import {
 
 import {
   analysisApi,
+  type AnalysisColumn,
   type AnalysisTable,
   type AnalyzeResult,
   type FilterOp,
@@ -22,13 +24,21 @@ import {
   type MetricAgg,
   type MetricSpec,
 } from "@/lib/analysis-api"
-import { GRAPH_EDGES, GRAPH_NODES, TIMELINE, type GraphNode } from "@/lib/mock"
-import { useResourceDrawer } from "@/components/resource-detail-drawer"
+import { ontologyApi, type GraphNode, type OntologyGraph } from "@/lib/ontology-api"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 
 type View = "graph" | "timeline" | "map" | "table"
+
+// Ontology node color -> Tailwind border/text classes (same map as the ontology page).
+const COLOR: Record<string, string> = {
+  emerald: "border-emerald-500/60 text-emerald-500",
+  sky: "border-sky-500/60 text-sky-500",
+  violet: "border-violet-500/60 text-violet-500",
+  amber: "border-amber-500/60 text-amber-500",
+  rose: "border-rose-500/60 text-rose-500",
+}
 
 // Same order as the original prototype; 表格 hosts the aggregation workbench.
 const VIEWS: { key: View; label: string; icon: React.ElementType }[] = [
@@ -73,12 +83,25 @@ export default function AnalysisPage() {
   const [metrics, setMetrics] = React.useState<MetricSpec[]>([])
   const [filters, setFilters] = React.useState<FilterSpec[]>([])
   const [result, setResult] = React.useState<AnalyzeResult | null>(null)
-  const [view, setView] = React.useState<View>("table")
+  // Shared "current object set" detail rows: the same filtered records feed the
+  // timeline/map views, so switching views only changes the lens, not the data.
+  const [detailRows, setDetailRows] = React.useState<Record<string, unknown>[]>([])
+  const [graph, setGraph] = React.useState<OntologyGraph>({ nodes: [], links: [] })
+  const [view, setView] = React.useState<View>("graph")
 
   const table = tables.find((t) => t.name === tableName) ?? null
   const dimensions = table?.columns.filter((c) => c.kind === "dimension" && c.name !== "id") ?? []
   const measures = table?.columns.filter((c) => c.kind === "measure") ?? []
   const isAgg = view === "table"
+
+  // Capability detection on the current object type's columns.
+  const timeCol =
+    table?.columns.find((c) => c.data_type && /^(DATE|TIMESTAMP)/i.test(c.data_type)) ?? null
+  const geoCol = table?.columns.find((c) => c.name === "city" || c.name === "region") ?? null
+  const viewAvailable = React.useCallback(
+    (v: View) => (v === "timeline" ? !!timeCol : v === "map" ? !!geoCol : true),
+    [timeCol, geoCol]
+  )
 
   // Load the catalog, select the first table with sensible defaults.
   React.useEffect(() => {
@@ -92,6 +115,11 @@ export default function AnalysisPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Load the ontology type-level graph once (drives the graph overview view).
+  React.useEffect(() => {
+    ontologyApi.graph().then(setGraph).catch(() => {})
+  }, [])
+
   function selectTable(t: AnalysisTable) {
     setTableName(t.name)
     // Default to detail mode: no grouping, no measure — show all rows as-is.
@@ -100,6 +128,12 @@ export default function AnalysisPage() {
     setFilters([])
     setResult(null)
   }
+
+  // Fall back to the table view if switching object types makes the current
+  // view unavailable (e.g. a type without a time or geo property).
+  React.useEffect(() => {
+    if (!viewAvailable(view)) setView("table")
+  }, [viewAvailable, view])
 
   // Auto-run on any config change (debounced). No metrics = detail mode:
   // the service returns the filtered rows as-is.
@@ -118,6 +152,42 @@ export default function AnalysisPage() {
     }, 300)
     return () => window.clearTimeout(timer)
   }, [tableName, groupBy, metrics, filters])
+
+  // Keep the shared object set in sync with the current type + filters. Detail
+  // mode is cheap (<=1000 rows); timeline/map read from these rows.
+  React.useEffect(() => {
+    if (!tableName) {
+      setDetailRows([])
+      return
+    }
+    const timer = window.setTimeout(() => {
+      analysisApi
+        .analyze({
+          table: tableName,
+          group_by: null,
+          metrics: [],
+          filters: filters.filter((f) => String(f.value).trim() !== ""),
+        })
+        .then((r) => setDetailRows(r.rows as Record<string, unknown>[]))
+        .catch(() => setOffline(true))
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [tableName, filters])
+
+  // Drill from the map into the detail table filtered to one geo value.
+  function drillGeo(value: string) {
+    if (!geoCol) return
+    setFilters([{ field: geoCol.name, op: "eq", value }])
+    setView("table")
+  }
+
+  // Enter an object type's detail set from the ontology graph.
+  function selectTypeFromGraph(node: GraphNode) {
+    const t = tables.find((x) => x.name === node.api_name)
+    if (!t) return
+    selectTable(t)
+    setView("table")
+  }
 
   return (
     <PageContainer className="h-full">
@@ -138,19 +208,38 @@ export default function AnalysisPage() {
 
       {/* View switcher */}
       <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
-        {VIEWS.map((v) => (
-          <button
-            key={v.key}
-            onClick={() => setView(v.key)}
-            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              view === v.key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <v.icon className="size-4" /> {v.label}
-          </button>
-        ))}
+        {VIEWS.map((v) => {
+          const disabled = !viewAvailable(v.key)
+          const disabledTitle =
+            v.key === "timeline"
+              ? "当前对象类型无时间属性"
+              : v.key === "map"
+                ? "当前对象类型无地理属性"
+                : undefined
+          return (
+            <button
+              key={v.key}
+              onClick={() => !disabled && setView(v.key)}
+              disabled={disabled}
+              title={disabled ? disabledTitle : undefined}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                disabled ? "cursor-not-allowed opacity-50" : ""
+              } ${
+                view === v.key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <v.icon className="size-4" /> {v.label}
+            </button>
+          )
+        })}
         <div className="ml-auto pr-2 text-xs text-muted-foreground">
-          {isAgg ? (table ? `分析上下文：${table.label}` : "") : "演示数据 · 待接本体服务"}
+          {view === "graph"
+            ? `本体总览 · ${graph.nodes.length} 个对象类型`
+            : table
+              ? `分析上下文：${table.label}${
+                  view === "timeline" || view === "map" ? ` · 命中 ${detailRows.length} 行` : ""
+                }`
+              : ""}
         </div>
       </div>
 
@@ -365,9 +454,20 @@ export default function AnalysisPage() {
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-          {view === "graph" && <GraphView />}
-          {view === "timeline" && <TimelineView />}
-          {view === "map" && <MapView />}
+          {view === "graph" && (
+            <GraphView
+              graph={graph}
+              tables={tables}
+              tableName={tableName}
+              onSelect={selectTypeFromGraph}
+            />
+          )}
+          {view === "timeline" && timeCol && (
+            <TimelineView detailRows={detailRows} columns={table?.columns ?? []} timeCol={timeCol} />
+          )}
+          {view === "map" && geoCol && (
+            <MapView detailRows={detailRows} geoCol={geoCol} onDrill={drillGeo} />
+          )}
         </div>
       )}
     </PageContainer>
@@ -431,85 +531,132 @@ function ResultTable({ result, table }: { result: AnalyzeResult; table: Analysis
   )
 }
 
-// --- Prototype views below: demo data until the ontology service exists. ---
+// --- Data-driven views: all read the same current object set. ---
 
-const NODE_COLOR: Record<GraphNode["type"], string> = {
-  person: "#10b981",
-  org: "#0ea5e9",
-  account: "#a855f7",
-  device: "#f59e0b",
-  event: "#ef4444",
-}
-const NODE_LABEL: Record<GraphNode["type"], string> = {
-  person: "人员",
-  org: "组织",
-  account: "账户",
-  device: "设备",
-  event: "事件",
-}
+const NODE_W = 160
+const NODE_H = 64
 
-function GraphView() {
-  const { open } = useResourceDrawer()
-  const R = 26
+// The graph overview: the ontology's type layer. Clicking a type enters its
+// detail set (the table view scoped to that object type).
+function GraphView({
+  graph,
+  tables,
+  tableName,
+  onSelect,
+}: {
+  graph: OntologyGraph
+  tables: AnalysisTable[]
+  tableName: string
+  onSelect: (node: GraphNode) => void
+}) {
+  const nodeById = (id: string) => graph.nodes.find((n) => n.id === id)
+
+  if (graph.nodes.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        本体暂无对象类型
+      </div>
+    )
+  }
+
   return (
-    <div className="relative h-full min-h-[440px] overflow-auto bg-[radial-gradient(circle,var(--color-border)_1px,transparent_1px)] [background-size:22px_22px]">
-      <svg className="h-full min-h-[440px] w-full min-w-[760px]">
-        {GRAPH_EDGES.map((e, i) => {
-          const a = GRAPH_NODES.find((n) => n.id === e.from)!
-          const b = GRAPH_NODES.find((n) => n.id === e.to)!
+    <div className="relative h-full min-h-[440px] overflow-auto bg-[radial-gradient(circle,var(--color-border)_1px,transparent_1px)] [background-size:20px_20px]">
+      <div className="relative" style={{ minWidth: 800, minHeight: 520 }}>
+        <svg className="absolute inset-0 h-full w-full" style={{ pointerEvents: "none" }}>
+          {graph.links.map((l) => {
+            const a = nodeById(l.from_object_type_id)
+            const b = nodeById(l.to_object_type_id)
+            if (!a || !b) return null
+            const x1 = a.x + NODE_W / 2,
+              y1 = a.y + NODE_H / 2
+            const x2 = b.x + NODE_W / 2,
+              y2 = b.y + NODE_H / 2
+            return (
+              <g key={l.id}>
+                <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--color-muted-foreground)" strokeWidth={1.5} strokeOpacity={0.5} />
+                <rect x={(x1 + x2) / 2 - 30} y={(y1 + y2) / 2 - 9} width={60} height={18} rx={4} fill="var(--color-card)" stroke="var(--color-border)" />
+                <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground)">
+                  {l.display_name.length > 8 ? l.display_name.slice(0, 7) + "…" : l.display_name}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+
+        {graph.nodes.map((n) => {
+          const hasTable = tables.some((t) => t.name === n.api_name)
+          const active = n.api_name === tableName
           return (
-            <g key={i}>
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--color-muted-foreground)" strokeOpacity={0.4} strokeWidth={1.5} />
-              <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground)">
-                {e.label}
-              </text>
-            </g>
+            <div
+              key={n.id}
+              onClick={() => onSelect(n)}
+              className={`absolute z-10 flex flex-col justify-center rounded-lg border-2 bg-card px-3 text-left shadow-sm ${
+                COLOR[n.color] ?? COLOR.emerald
+              } ${active ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""} ${
+                hasTable ? "cursor-pointer" : "cursor-default"
+              }`}
+              style={{ left: n.x, top: n.y, width: NODE_W, height: NODE_H }}
+            >
+              <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-foreground">
+                <Share2Icon className="size-3.5 shrink-0" />
+                <span className="truncate">{n.display_name}</span>
+              </div>
+              <div className="truncate text-[11px] text-muted-foreground">
+                {n.instance_count ?? "—"} 实例
+              </div>
+            </div>
           )
         })}
-        {GRAPH_NODES.map((n) => (
-          <g key={n.id} className="cursor-pointer" onClick={() => open({ name: n.label, kind: NODE_LABEL[n.type] })}>
-            <circle cx={n.x} cy={n.y} r={R} fill={NODE_COLOR[n.type]} fillOpacity={0.18} stroke={NODE_COLOR[n.type]} strokeWidth={n.risk ? 2.5 : 1.5} />
-            {n.risk && <circle cx={n.x + R - 4} cy={n.y - R + 4} r={5} fill="#ef4444" />}
-            <text x={n.x} y={n.y + 4} textAnchor="middle" fontSize={10} fontWeight={600} fill="var(--color-foreground)">
-              {NODE_LABEL[n.type]}
-            </text>
-            <text x={n.x} y={n.y + R + 14} textAnchor="middle" fontSize={11} fill="var(--color-foreground)">
-              {n.label}
-            </text>
-          </g>
-        ))}
-      </svg>
-      <div className="absolute top-3 left-3 flex flex-wrap gap-2 rounded-lg border border-border bg-card/90 p-2 backdrop-blur">
-        {Object.entries(NODE_LABEL).map(([k, label]) => (
-          <span key={k} className="flex items-center gap-1 text-xs">
-            <span className="size-2.5 rounded-full" style={{ background: NODE_COLOR[k as GraphNode["type"]] }} />
-            {label}
-          </span>
-        ))}
       </div>
     </div>
   )
 }
 
-function TimelineView() {
-  const LEVEL = {
-    info: "bg-sky-500",
-    warn: "bg-amber-500",
-    danger: "bg-red-500",
-  }
+// Timeline: current object set ordered by its time property.
+function TimelineView({
+  detailRows,
+  columns,
+  timeCol,
+}: {
+  detailRows: Record<string, unknown>[]
+  columns: AnalysisColumn[]
+  timeCol: AnalysisColumn
+}) {
+  // Title column: prefer a "name" column, else the first column (primary key).
+  const titleCol = columns.find((c) => c.name === "name") ?? columns[0]
+  // A few other dimension columns for the subtitle (excluding time + title).
+  const subCols = columns
+    .filter(
+      (c) => c.kind === "dimension" && c.name !== timeCol.name && c.name !== titleCol?.name
+    )
+    .slice(0, 3)
+
+  const items = detailRows
+    .map((row) => ({
+      time: String(row[timeCol.name] ?? ""),
+      title: String(row[titleCol?.name ?? ""] ?? ""),
+      sub: subCols.map((c) => `${c.label}: ${row[c.name] ?? "—"}`).join(" · "),
+    }))
+    .filter((it) => it.time !== "")
+    // ISO date/timestamp strings sort correctly as plain strings; newest first.
+    .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0))
+
+  const shown = items.slice(0, 100)
+
   return (
     <div className="h-full overflow-auto p-6">
+      <div className="mx-auto mb-4 max-w-2xl text-xs text-muted-foreground">
+        按 {timeCol.label} 排列 · 共 {items.length} 条（截取前 100）
+      </div>
       <ol className="relative mx-auto max-w-2xl space-y-5 border-l-2 border-border pl-6">
-        {TIMELINE.map((t, i) => (
+        {shown.map((t, i) => (
           <li key={i} className="relative">
-            <span className={`absolute -left-[31px] top-1 flex size-4 items-center justify-center rounded-full ${LEVEL[t.level]} ring-4 ring-card`} />
+            <span className="absolute -left-[31px] top-1 flex size-4 items-center justify-center rounded-full bg-emerald-500 ring-4 ring-card" />
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs text-muted-foreground">{t.time}</span>
-              {t.level === "danger" && <Badge variant="danger">高风险</Badge>}
-              {t.level === "warn" && <Badge variant="warning">可疑</Badge>}
             </div>
             <div className="text-sm font-medium">{t.title}</div>
-            <div className="text-sm text-muted-foreground">{t.detail}</div>
+            {t.sub && <div className="text-sm text-muted-foreground">{t.sub}</div>}
           </li>
         ))}
       </ol>
@@ -517,30 +664,87 @@ function TimelineView() {
   )
 }
 
-function MapView() {
-  const points = [
-    { x: "28%", y: "42%", risk: false },
-    { x: "62%", y: "35%", risk: true },
-    { x: "70%", y: "60%", risk: false },
-    { x: "45%", y: "68%", risk: true },
-    { x: "55%", y: "50%", risk: false },
-  ]
+// Approximate percentage coordinates for the demo map (not a real projection);
+// they roughly mirror each location's relative position within China.
+const GEO_COORDS: Record<string, { x: number; y: number }> = {
+  上海: { x: 78, y: 58 },
+  北京: { x: 66, y: 30 },
+  广州: { x: 68, y: 82 },
+  成都: { x: 38, y: 62 },
+  武汉: { x: 62, y: 58 },
+  西安: { x: 50, y: 44 },
+  沈阳: { x: 78, y: 20 },
+  杭州: { x: 77, y: 62 },
+  深圳: { x: 70, y: 84 },
+  重庆: { x: 45, y: 62 },
+  华东: { x: 75, y: 58 },
+  华北: { x: 64, y: 30 },
+  华南: { x: 68, y: 82 },
+  西南: { x: 42, y: 62 },
+  海外: { x: 90, y: 88 },
+}
+
+// Map: current object set grouped by its geo property; click a point to drill in.
+function MapView({
+  detailRows,
+  geoCol,
+  onDrill,
+}: {
+  detailRows: Record<string, unknown>[]
+  geoCol: AnalysisColumn
+  onDrill: (value: string) => void
+}) {
+  const counts = new Map<string, number>()
+  for (const row of detailRows) {
+    const v = String(row[geoCol.name] ?? "").trim()
+    if (v === "") continue
+    counts.set(v, (counts.get(v) ?? 0) + 1)
+  }
+  const known: { value: string; count: number; x: number; y: number }[] = []
+  const unknown: { value: string; count: number }[] = []
+  for (const [value, count] of Array.from(counts.entries())) {
+    const c = GEO_COORDS[value]
+    if (c) known.push({ value, count, x: c.x, y: c.y })
+    else unknown.push({ value, count })
+  }
+  // Point size buckets by count.
+  const sizeFor = (n: number) => (n <= 5 ? 8 : n <= 50 ? 14 : 22)
+
   return (
     <div className="relative h-full min-h-[440px] overflow-hidden bg-[linear-gradient(var(--color-border)_1px,transparent_1px),linear-gradient(90deg,var(--color-border)_1px,transparent_1px)] [background-size:40px_40px]">
       <div className="absolute inset-0 bg-gradient-to-br from-sky-500/5 to-emerald-500/5" />
       <div className="absolute top-3 left-3 rounded-lg border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
-        <MapIcon className="mr-1 inline size-3.5" /> 地理空间分布 · 5 个热点
+        <MapIcon className="mr-1 inline size-3.5" /> 地理分布 · {known.length} 个位置 · 按 {geoCol.label}
       </div>
-      {points.map((p, i) => (
-        <span
-          key={i}
-          className="absolute -translate-x-1/2 -translate-y-1/2"
-          style={{ left: p.x, top: p.y }}
-        >
-          <span className={`block size-3 rounded-full ${p.risk ? "bg-red-500" : "bg-emerald-500"}`} />
-          <span className={`absolute inset-0 animate-ping rounded-full ${p.risk ? "bg-red-500/60" : "bg-emerald-500/60"}`} />
-        </span>
-      ))}
+      {known.map((p) => {
+        const size = sizeFor(p.count)
+        return (
+          <button
+            key={p.value}
+            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1"
+            style={{ left: `${p.x}%`, top: `${p.y}%` }}
+            onClick={() => onDrill(p.value)}
+            title={`下钻到 ${p.value}`}
+          >
+            <span className="block rounded-full bg-emerald-500" style={{ width: size, height: size }} />
+            <span className="whitespace-nowrap text-xs text-foreground">
+              {p.value} · {p.count}
+            </span>
+          </button>
+        )
+      })}
+      {unknown.length > 0 && (
+        <div className="absolute right-3 bottom-3 left-3 flex flex-wrap gap-1.5">
+          {unknown.map((u) => (
+            <span
+              key={u.value}
+              className="rounded-md border border-border bg-card/90 px-2 py-0.5 text-xs text-muted-foreground backdrop-blur"
+            >
+              未识别位置：{u.value} · {u.count}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

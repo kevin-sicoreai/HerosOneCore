@@ -9,6 +9,7 @@ class ColumnOut(BaseModel):
     name: str
     label: str
     kind: str
+    data_type: str | None = None
 
 
 class TableOut(BaseModel):
