@@ -1,10 +1,11 @@
 """Governance endpoints: lineage, audit, roles, stats."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_token
 from app.core.db import get_db
-from app.schemas.governance import AuditEntry, Lineage, RoleOut, Stats
+from app.schemas.governance import AuditEntry, AuditEventIn, Lineage, RoleOut, Stats
 from app.services import audit_service, lineage_service, roles_service, stats_service
 
 router = APIRouter(tags=["governance"])
@@ -16,8 +17,18 @@ def get_lineage() -> Lineage:
 
 
 @router.get("/audit", response_model=list[AuditEntry])
-def get_audit(limit: int = Query(default=100, ge=1, le=1000)) -> list[AuditEntry]:
-    return audit_service.build(limit)
+def get_audit(limit: int = Query(default=100, ge=1, le=1000), db: Session = Depends(get_db)) -> list[AuditEntry]:
+    return audit_service.build(db, limit)
+
+
+@router.post("/audit-events", status_code=status.HTTP_204_NO_CONTENT)
+def ingest_audit(
+    payload: AuditEventIn,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_token),
+) -> None:
+    """Append one audit row. Posted by services (with a service token) on each write."""
+    audit_service.record(db, payload)
 
 
 @router.get("/roles", response_model=list[RoleOut])

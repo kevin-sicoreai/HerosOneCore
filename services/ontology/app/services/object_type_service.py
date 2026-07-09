@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.clients import data_client
 from app.events import publishers
-from app.repositories.models import ObjectType, Property
+from app.repositories.models import LinkType, ObjectType, Property
 from app.schemas.object_type import ObjectTypeCreate, ObjectTypeUpdate
 
 
@@ -83,5 +83,11 @@ def update(db: Session, object_type_id: str, payload: ObjectTypeUpdate) -> Objec
 
 def delete(db: Session, object_type_id: str) -> None:
     ot = get_or_404(db, object_type_id)
+    # Cascade-delete link types on either endpoint. SQLite does not enforce the
+    # declared FK cascade, so do it explicitly to avoid orphaned links.
+    db.query(LinkType).filter(
+        (LinkType.from_object_type_id == object_type_id)
+        | (LinkType.to_object_type_id == object_type_id)
+    ).delete(synchronize_session=False)
     db.delete(ot)
     db.commit()

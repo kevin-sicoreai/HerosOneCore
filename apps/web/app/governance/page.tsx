@@ -1,15 +1,27 @@
 "use client"
 
 import * as React from "react"
+import {
+  Handle,
+  Position,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+  type NodeProps,
+  type NodeTypes,
+  type OnConnect,
+} from "@xyflow/react"
 import { ClockIcon, KeyIcon, LockIcon, ScrollTextIcon, Share2Icon, ShieldCheckIcon, UsersIcon } from "lucide-react"
 
 import { governanceApi, type AuditEntry, type Lineage, type Role, type Stats } from "@/lib/governance-api"
+import { FlowCanvas } from "@/components/flow/flow-canvas"
+import { layoutWithDagre } from "@/components/flow/flow-layout"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-const TYPE_ORDER = ["connector", "dataset", "pipeline", "mart", "object_type"]
 const TYPE_META: Record<string, { label: string; cls: string }> = {
   connector: { label: "连接器", cls: "border-sky-500/60 text-sky-500" },
   dataset: { label: "数据集", cls: "border-emerald-500/60 text-emerald-500" },
@@ -17,10 +29,20 @@ const TYPE_META: Record<string, { label: string; cls: string }> = {
   mart: { label: "产出表", cls: "border-violet-500/60 text-violet-500" },
   object_type: { label: "对象类型", cls: "border-rose-500/60 text-rose-500" },
 }
-const COL_W = 200
-const ROW_H = 74
-const NODE_W = 150
-const NODE_H = 50
+
+// Read-only lineage node: colored by asset type.
+function LineageNode({ data }: NodeProps) {
+  const d = data as unknown as { label: string; kind: string }
+  const m = TYPE_META[d.kind] ?? TYPE_META.dataset
+  return (
+    <div className={`flex h-[44px] w-[132px] flex-col justify-center rounded-lg border-2 bg-card px-2 ${m.cls}`}>
+      <Handle type="target" position={Position.Left} className="!size-2 !border-border !bg-background" />
+      <div className="truncate text-[11px] font-semibold text-foreground">{d.label}</div>
+      <div className="truncate text-[9px] text-muted-foreground">{m.label}</div>
+      <Handle type="source" position={Position.Right} className="!size-2 !border-border !bg-background" />
+    </div>
+  )
+}
 
 export default function GovernancePage() {
   const [stats, setStats] = React.useState<Stats | null>(null)
@@ -28,6 +50,11 @@ export default function GovernancePage() {
   const [lineage, setLineage] = React.useState<Lineage>({ nodes: [], edges: [] })
   const [audit, setAudit] = React.useState<AuditEntry[]>([])
   const [error, setError] = React.useState<string | null>(null)
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const nodeTypes = React.useMemo<NodeTypes>(() => ({ lineage: LineageNode }), [])
+  const noop = React.useCallback<OnConnect>(() => {}, [])
 
   React.useEffect(() => {
     ;(async () => {
@@ -42,18 +69,19 @@ export default function GovernancePage() {
     })()
   }, [])
 
-  // layout lineage nodes into columns by type
-  const positions = React.useMemo(() => {
-    const rows: Record<string, number> = {}
-    const pos: Record<string, { x: number; y: number }> = {}
-    for (const n of lineage.nodes) {
-      const col = Math.max(0, TYPE_ORDER.indexOf(n.type))
-      const row = rows[n.type] ?? 0
-      rows[n.type] = row + 1
-      pos[n.id] = { x: 20 + col * COL_W, y: 20 + row * ROW_H }
-    }
-    return pos
-  }, [lineage])
+  // build React Flow state from the lineage graph and pre-lay-out with dagre so
+  // nodes enter the store already positioned (fitView then zooms to the whole graph).
+  React.useEffect(() => {
+    const rawNodes: Node[] = lineage.nodes.map((n) => ({
+      id: n.id,
+      type: "lineage",
+      position: { x: 0, y: 0 },
+      data: { label: n.label, kind: n.type } as unknown as Record<string, unknown>,
+    }))
+    const rawEdges: Edge[] = lineage.edges.map((e, i) => ({ id: `e${i}`, source: e.from_id, target: e.to_id }))
+    setNodes(layoutWithDagre(rawNodes, rawEdges, "LR"))
+    setEdges(rawEdges)
+  }, [lineage, setNodes, setEdges])
 
   const cards = [
     { k: "受控资源", v: stats?.governed_assets ?? "—", icon: LockIcon },
@@ -61,7 +89,6 @@ export default function GovernancePage() {
     { k: "审计事件", v: stats?.audit_events ?? "—", icon: ScrollTextIcon },
     { k: "加密覆盖", v: stats?.encryption_coverage ?? "—", icon: KeyIcon },
   ]
-  const canvasH = 40 + Math.max(1, ...TYPE_ORDER.map((t) => lineage.nodes.filter((n) => n.type === t).length)) * ROW_H
 
   return (
     <PageContainer>
@@ -100,36 +127,20 @@ export default function GovernancePage() {
           <Card>
             <CardHeader><CardTitle>全平台数据血缘（{lineage.nodes.length} 资产 · {lineage.edges.length} 关系）</CardTitle></CardHeader>
             <CardContent>
-              <div className="overflow-auto rounded-lg border border-border">
-                <div className="relative" style={{ width: TYPE_ORDER.length * COL_W + 40, height: canvasH }}>
-                  <svg className="absolute inset-0 h-full w-full" style={{ pointerEvents: "none" }}>
-                    <defs>
-                      <marker id="ga" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                        <path d="M0,0 L7,3 L0,6" fill="var(--color-muted-foreground)" />
-                      </marker>
-                    </defs>
-                    {lineage.edges.map((e, i) => {
-                      const a = positions[e.from_id], b = positions[e.to_id]
-                      if (!a || !b) return null
-                      const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2
-                      const x2 = b.x, y2 = b.y + NODE_H / 2
-                      const mx = (x1 + x2) / 2
-                      return <path key={i} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke="var(--color-muted-foreground)" strokeOpacity={0.5} strokeWidth={1.5} markerEnd="url(#ga)" />
-                    })}
-                  </svg>
-                  {lineage.nodes.map((n) => {
-                    const p = positions[n.id], m = TYPE_META[n.type]
-                    return (
-                      <div key={n.id} className={`absolute z-10 flex flex-col justify-center overflow-hidden rounded-lg border-2 bg-card px-2.5 ${m?.cls ?? ""}`} style={{ left: p.x, top: p.y, width: NODE_W, height: NODE_H }}>
-                        <div className="truncate text-xs font-semibold text-foreground">{n.label}</div>
-                        <div className="truncate text-[10px] text-muted-foreground">{m?.label ?? n.type}</div>
-                      </div>
-                    )
-                  })}
-                  {lineage.nodes.length === 0 && !error && (
-                    <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">暂无血缘数据</div>
-                  )}
-                </div>
+              <div className="h-[clamp(380px,52vh,600px)]">
+                <FlowCanvas
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={nodeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={noop}
+                  setNodes={setNodes}
+                  nodesConnectable={false}
+                  deleteKeyCode={null}
+                  direction="LR"
+                  emptyHint={error ? "无法连接 governance 服务" : "暂无血缘数据"}
+                />
               </div>
             </CardContent>
           </Card>
@@ -169,6 +180,7 @@ export default function GovernancePage() {
                 <thead className="text-xs text-muted-foreground">
                   <tr className="border-y border-border">
                     <th className="px-4 py-2 text-left font-medium">时间</th>
+                    <th className="px-4 py-2 text-left font-medium">操作人</th>
                     <th className="px-4 py-2 text-left font-medium">来源</th>
                     <th className="px-4 py-2 text-left font-medium">操作</th>
                     <th className="px-4 py-2 text-left font-medium">对象</th>
@@ -178,12 +190,13 @@ export default function GovernancePage() {
                   {audit.map((a, i) => (
                     <tr key={i} className="border-b border-border/60 last:border-0">
                       <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{a.time ? a.time.slice(0, 19).replace("T", " ") : "—"}</td>
+                      <td className="px-4 py-2">{a.actor}</td>
                       <td className="px-4 py-2"><Badge variant="outline">{a.source}</Badge></td>
                       <td className="px-4 py-2">{a.action}</td>
                       <td className="px-4 py-2 text-muted-foreground">{a.target}</td>
                     </tr>
                   ))}
-                  {audit.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">暂无审计事件</td></tr>}
+                  {audit.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">暂无审计事件</td></tr>}
                 </tbody>
               </table>
             </CardContent>

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.clients import source_postgres
+from app.core.pagination import paginate
 from app.domain.connector_types import get_connector_type, is_supported
 from app.repositories.models import Connector
 from app.schemas.connector import ConnectorCreate, ConnectorOut, ConnectorUpdate
@@ -58,8 +59,34 @@ def create(db: Session, payload: ConnectorCreate) -> Connector:
     return connector
 
 
-def list_all(db: Session) -> list[Connector]:
-    return list(db.scalars(select(Connector).order_by(Connector.created_at.desc())))
+_INTERNAL_SOURCE_TYPE = "internal"
+
+
+def list_page(
+    db: Session,
+    *,
+    page: int,
+    page_size: int,
+    kind: str | None = None,
+    status: str | None = None,
+    source_type: str | None = None,
+    q: str | None = None,
+) -> tuple[list[Connector], int]:
+    stmt = select(Connector)
+    # `kind` splits platform-managed internal connectors (e.g. pipeline output
+    # catalogs) from externally-configured data sources.
+    if kind == "internal":
+        stmt = stmt.where(Connector.source_type == _INTERNAL_SOURCE_TYPE)
+    elif kind == "external":
+        stmt = stmt.where(Connector.source_type != _INTERNAL_SOURCE_TYPE)
+    if status:
+        stmt = stmt.where(Connector.status == status)
+    if source_type:
+        stmt = stmt.where(Connector.source_type == source_type)
+    if q:
+        stmt = stmt.where(Connector.name.ilike(f"%{q}%"))
+    stmt = stmt.order_by(Connector.created_at.desc())
+    return paginate(db, stmt, page, page_size)
 
 
 def update(db: Session, connector_id: str, payload: ConnectorUpdate) -> Connector:

@@ -1,8 +1,9 @@
-"""ORM models for the governance store (access matrix / roles)."""
+"""ORM models for the governance store (access matrix / roles + audit log)."""
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -10,6 +11,10 @@ from app.core.db import Base
 
 def _uuid() -> str:
     return uuid4().hex
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Role(Base):
@@ -22,3 +27,18 @@ class Role(Base):
     can_write: Mapped[bool] = mapped_column(Boolean, default=False)
     can_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AuditEvent(Base):
+    """Append-only audit log — one row per successful mutating request, platform-wide."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    actor: Mapped[str] = mapped_column(String(128), default="anonymous")
+    action: Mapped[str] = mapped_column(String(32))   # HTTP method
+    target: Mapped[str] = mapped_column(String(512))  # request path
+    source: Mapped[str] = mapped_column(String(64))   # originating service
+    status_code: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import {
-  ArrowRightIcon,
+  ChevronDownIcon,
   ClockIcon,
   FingerprintIcon,
   GitCommitVerticalIcon,
@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 
 import { governanceApi, type AuditEntry, type Lineage, type Role } from "@/lib/governance-api"
-import { AUDIT, GRANTS, LINEAGE } from "@/lib/mock"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import {
   Sheet,
@@ -41,10 +41,12 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
   const [resource, setResource] = React.useState<ResourceRef | null>(null)
   const [open, setOpen] = React.useState(false)
 
-  // Real governance data (falls back to mock if the service is unavailable).
+  // Real governance data (no mock fallback — show honest empty/error states).
   const [roles, setRoles] = React.useState<Role[]>([])
   const [audit, setAudit] = React.useState<AuditEntry[]>([])
   const [lineage, setLineage] = React.useState<Lineage>({ nodes: [], edges: [] })
+  const [loading, setLoading] = React.useState(false)
+  const [failed, setFailed] = React.useState(false)
 
   const api = React.useMemo<Ctx>(
     () => ({
@@ -58,47 +60,62 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
 
   React.useEffect(() => {
     if (!open || !resource) return
+    setLoading(true)
+    setFailed(false)
     Promise.all([governanceApi.roles(), governanceApi.audit(50), governanceApi.lineage()])
       .then(([r, a, l]) => {
         setRoles(r)
         setAudit(a)
         setLineage(l)
       })
-      .catch(() => {})
+      .catch(() => setFailed(true))
+      .finally(() => setLoading(false))
   }, [open, resource])
 
-  // --- lineage: upstream (incoming edges) and downstream (outgoing edges) are
-  //     both computed from the real platform lineage graph.
+  // --- lineage: full multi-level upstream/downstream (BFS by level) from the
+  //     real platform lineage graph.
   const node = lineage.nodes.find((n) => n.label === resource?.name)
-  const realUpstream = node
-    ? lineage.edges
-        .filter((e) => e.to_id === node.id)
-        .map((e) => lineage.nodes.find((n) => n.id === e.from_id)?.label)
-        .filter((x): x is string => !!x)
-    : []
-  const realDownstream = node
-    ? lineage.edges
-        .filter((e) => e.from_id === node.id)
-        .map((e) => lineage.nodes.find((n) => n.id === e.to_id)?.label)
-        .filter((x): x is string => !!x)
-    : []
-  const upstreamItems = realUpstream.length ? realUpstream : LINEAGE.upstream
-  const downstreamItems = realDownstream.length ? realDownstream : LINEAGE.downstream
 
-  // --- access: real roles, else mock ---
-  const accessRows = roles.length
-    ? roles.map((r) => ({ role: r.name, members: r.members, read: r.can_read, write: r.can_write, admin: r.can_admin }))
-    : GRANTS
+  function bfsLevels(startId: string, dir: "up" | "down"): string[][] {
+    const label = (id: string) => lineage.nodes.find((n) => n.id === id)?.label ?? id
+    const out: string[][] = []
+    const seen = new Set([startId])
+    let frontier = [startId]
+    while (frontier.length) {
+      const next: string[] = []
+      for (const id of frontier)
+        for (const e of lineage.edges) {
+          const nbr = dir === "up" ? (e.to_id === id ? e.from_id : null) : (e.from_id === id ? e.to_id : null)
+          if (nbr && !seen.has(nbr)) {
+            seen.add(nbr)
+            next.push(nbr)
+          }
+        }
+      if (next.length) out.push(next.map(label))
+      frontier = next
+    }
+    return out
+  }
 
-  // --- audit: real (prefer entries about this resource), else mock ---
+  const upLevels = node ? bfsLevels(node.id, "up") : []
+  const downLevels = node ? bfsLevels(node.id, "down") : []
+
+  // --- access: real platform roles ---
+  const accessRows = roles.map((r) => ({
+    role: r.name,
+    members: r.members,
+    read: r.can_read,
+    write: r.can_write,
+    admin: r.can_admin,
+  }))
+
+  // --- audit: real entries (prefer ones about this resource) ---
   const forResource = audit.filter((a) => a.target === resource?.name)
-  const auditRows = audit.length
-    ? (forResource.length ? forResource : audit).slice(0, 10).map((a) => ({
-        action: a.action,
-        sub: `${a.source} · ${a.target}`,
-        time: a.time ? a.time.slice(0, 19).replace("T", " ") : "",
-      }))
-    : AUDIT.map((a) => ({ action: a.action, sub: `${a.user} · ${a.target}`, time: a.time }))
+  const auditRows = (forResource.length ? forResource : audit).slice(0, 10).map((a) => ({
+    action: a.action,
+    sub: `${a.source} · ${a.target}`,
+    time: a.time ? a.time.slice(0, 19).replace("T", " ") : "",
+  }))
 
   return (
     <ResourceDrawerContext.Provider value={api}>
@@ -116,6 +133,11 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
           </SheetHeader>
 
           <div className="flex-1 overflow-y-auto px-4 pb-6">
+            {failed && (
+              <div className="mb-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">
+                无法连接治理服务
+              </div>
+            )}
             <Tabs defaultValue="lineage">
               <TabsList className="w-full">
                 <TabsTrigger value="lineage" className="flex-1">
@@ -130,18 +152,18 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
               </TabsList>
 
               <TabsContent value="lineage" className="pt-3">
-                <div className="space-y-3">
-                  <LineageBlock title="上游" items={upstreamItems} />
-                  <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium">
-                    <GitCommitVerticalIcon className="size-4 text-emerald-500" />
-                    {resource?.name ?? LINEAGE.node}
-                  </div>
-                  <LineageBlock title="下游" items={downstreamItems} />
-                </div>
+                {!node && !loading ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">该资源不在血缘图中</p>
+                ) : (
+                  <LineageFlow up={upLevels} down={downLevels} current={resource?.name ?? "当前资源"} />
+                )}
               </TabsContent>
 
               <TabsContent value="access" className="pt-3">
                 <div className="space-y-2">
+                  {accessRows.length === 0 && !loading && (
+                    <p className="py-6 text-center text-sm text-muted-foreground">暂无权限数据</p>
+                  )}
                   {accessRows.map((g) => (
                     <div
                       key={g.role}
@@ -165,6 +187,9 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
               </TabsContent>
 
               <TabsContent value="audit" className="pt-3">
+                {auditRows.length === 0 && !loading && (
+                  <p className="py-6 text-center text-sm text-muted-foreground">暂无审计记录</p>
+                )}
                 <ol className="relative space-y-4 border-l border-border pl-4">
                   {auditRows.map((a, i) => (
                     <li key={i} className="relative">
@@ -187,21 +212,72 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
   )
 }
 
-function LineageBlock({ title, items }: { title: string; items: string[] }) {
+// A tidy vertical lineage flow: uniform full-width rows connected top-to-bottom,
+// upstream above (farthest first) → current node (highlighted) → downstream below.
+function LineageFlow({ up, down, current }: { up: string[][]; down: string[][]; current: string }) {
+  const upDisplay = [...up].reverse() // farthest → nearest, flowing into the node
+  const upEmpty = up.reduce((n, lv) => n + lv.length, 0) === 0
+  const downEmpty = down.reduce((n, lv) => n + lv.length, 0) === 0
+
   return (
-    <div>
-      <div className="mb-1.5 text-xs font-medium text-muted-foreground">{title}</div>
-      <div className="space-y-1.5">
-        {items.map((it) => (
-          <div
-            key={it}
-            className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-sm"
-          >
-            <ArrowRightIcon className="size-3.5 text-muted-foreground" />
-            {it}
-          </div>
-        ))}
-      </div>
+    <div className="flex flex-col gap-1">
+      {upEmpty ? (
+        <FlowEmpty>无上游</FlowEmpty>
+      ) : (
+        upDisplay.map((level, li) => (
+          <React.Fragment key={`u${li}`}>
+            {level.map((label) => <FlowRow key={label} label={label} />)}
+            <FlowArrow />
+          </React.Fragment>
+        ))
+      )}
+
+      <FlowRow label={current} node />
+
+      {downEmpty ? (
+        <FlowEmpty>无下游</FlowEmpty>
+      ) : (
+        down.map((level, li) => (
+          <React.Fragment key={`d${li}`}>
+            <FlowArrow />
+            {level.map((label) => <FlowRow key={label} label={label} />)}
+          </React.Fragment>
+        ))
+      )}
+    </div>
+  )
+}
+
+function FlowRow({ label, node }: { label: string; node?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+        node ? "border-emerald-500/40 bg-emerald-500/10 font-medium" : "border-border bg-muted/30",
+      )}
+    >
+      {node ? (
+        <GitCommitVerticalIcon className="size-4 shrink-0 text-emerald-500" />
+      ) : (
+        <Share2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <span className="truncate">{label}</span>
+    </div>
+  )
+}
+
+function FlowArrow() {
+  return (
+    <div className="flex justify-center text-muted-foreground/40">
+      <ChevronDownIcon className="size-4" />
+    </div>
+  )
+}
+
+function FlowEmpty({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border px-3 py-1.5 text-center text-xs text-muted-foreground">
+      {children}
     </div>
   )
 }

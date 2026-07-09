@@ -1,6 +1,8 @@
 // Client for the pipeline service. Direct connection for now; moves behind the
 // gateway later.
 
+import { getToken } from "@/lib/auth-api"
+
 export const PIPELINE_API =
   process.env.NEXT_PUBLIC_PIPELINE_API_URL ?? "/api/pipeline"
 
@@ -40,9 +42,14 @@ export type Run = {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken()
   const res = await fetch(`${PIPELINE_API}${path}`, {
-    headers: { "content-type": "application/json" },
     ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
   })
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
   return (res.status === 204 ? undefined : await res.json()) as T

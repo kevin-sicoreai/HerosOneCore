@@ -34,6 +34,9 @@ def build_graph(db: Session) -> OntologyGraph:
         )
         for ot in object_types
     ]
+    # Only keep links whose both endpoints still exist (defensive against any
+    # orphaned link that slipped through).
+    ids = {ot.id for ot in object_types}
     graph_links = [
         GraphLink(
             id=lt.id,
@@ -43,5 +46,6 @@ def build_graph(db: Session) -> OntologyGraph:
             cardinality=lt.cardinality,
         )
         for lt in links
+        if lt.from_object_type_id in ids and lt.to_object_type_id in ids
     ]
     return OntologyGraph(nodes=nodes, links=graph_links)

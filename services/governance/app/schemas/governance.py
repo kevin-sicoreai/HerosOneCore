@@ -27,6 +27,17 @@ class AuditEntry(BaseModel):
     source: str  # which subsystem the event came from
 
 
+class AuditEventIn(BaseModel):
+    """Ingest payload posted by services on each successful write."""
+
+    actor: str = "anonymous"
+    action: str  # HTTP method
+    target: str  # request path
+    source: str  # originating service
+    status_code: int = 0
+    detail: str | None = None
+
+
 class RoleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

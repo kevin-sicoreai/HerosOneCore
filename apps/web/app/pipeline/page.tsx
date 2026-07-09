@@ -2,6 +2,18 @@
 
 import * as React from "react"
 import {
+  addEdge,
+  Handle,
+  Position,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+  type NodeProps,
+  type NodeTypes,
+  type OnConnect,
+} from "@xyflow/react"
+import {
   BoxesIcon,
   DatabaseIcon,
   GitMergeIcon,
@@ -17,16 +29,18 @@ import { dataApi, type Dataset } from "@/lib/data-api"
 import {
   pipelineApi,
   type Graph,
+  type GraphEdge,
   type GraphStep,
   type Pipeline,
   type StepKind,
 } from "@/lib/pipeline-api"
+import { FlowCanvas } from "@/components/flow/flow-canvas"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
-const NODE_W = 150
-const NODE_H = 56
+const NODE_W = 128
+const NODE_H = 44
 
 const KIND: Record<StepKind, { color: string; icon: React.ElementType; label: string }> = {
   source: { color: "border-sky-500/50 text-sky-500", icon: DatabaseIcon, label: "数据源" },
@@ -42,13 +56,6 @@ const STATUS_RING: Record<string, string> = {
   pending: "ring-2 ring-amber-400/60",
 }
 
-type EditStep = GraphStep
-type EditEdge = { from_step: string; to_step: string }
-
-function newId(): string {
-  return "n_" + Math.random().toString(36).slice(2, 9)
-}
-
 const DEFAULT_CONFIG: Record<StepKind, Record<string, unknown>> = {
   source: { dataset_id: "" },
   transform: { sql: "select * from input" },
@@ -56,40 +63,89 @@ const DEFAULT_CONFIG: Record<StepKind, Record<string, unknown>> = {
   output: { name: "" },
 }
 
+type PipeData = { label: string; kind: StepKind; config: Record<string, unknown>; status?: string }
+
+const pd = (n: Node) => n.data as unknown as PipeData
+
+function newId(): string {
+  return "n_" + Math.random().toString(36).slice(2, 9)
+}
+
+// --- domain <-> React Flow conversions ---------------------------------------
+function stepToNode(s: GraphStep): Node {
+  return {
+    id: s.id,
+    type: "pipeline",
+    position: { x: s.x, y: s.y },
+    data: { label: s.label ?? s.id, kind: s.kind, config: s.config } as unknown as Record<string, unknown>,
+  }
+}
+function nodeToStep(n: Node): GraphStep {
+  const d = pd(n)
+  return { id: n.id, kind: d.kind, config: d.config, label: d.label, x: Math.round(n.position.x), y: Math.round(n.position.y) }
+}
+const toRfEdge = (e: GraphEdge): Edge => ({ id: `${e.from_step}__${e.to_step}`, source: e.from_step, target: e.to_step })
+const fromRfEdge = (e: Edge): GraphEdge => ({ from_step: e.source, to_step: e.target })
+
+// --- custom node -------------------------------------------------------------
+function PipelineNode({ data, selected }: NodeProps) {
+  const d = data as unknown as PipeData
+  const k = KIND[d.kind]
+  const ring = d.status ? STATUS_RING[d.status] : ""
+  return (
+    <div
+      className={`flex items-center gap-1.5 rounded-lg border-2 bg-card px-2 shadow-sm ${k.color} ${ring} ${
+        selected ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""
+      }`}
+      style={{ width: NODE_W, height: NODE_H }}
+    >
+      <Handle type="target" position={Position.Left} className="!size-2 !border-2 !border-border !bg-background" />
+      <k.icon className="size-3.5 shrink-0" />
+      <div className="min-w-0 text-left">
+        <div className="truncate text-xs font-medium text-foreground">{d.label}</div>
+        <div className="text-[10px] text-muted-foreground">{k.label}</div>
+      </div>
+      <Handle type="source" position={Position.Right} className="!size-2 !border-2 !border-border !bg-background" />
+    </div>
+  )
+}
+
 export default function PipelinePage() {
   const [pipelines, setPipelines] = React.useState<Pipeline[]>([])
   const [pid, setPid] = React.useState<string>("")
-  const [steps, setSteps] = React.useState<EditStep[]>([])
-  const [edges, setEdges] = React.useState<EditEdge[]>([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [datasets, setDatasets] = React.useState<Dataset[]>([])
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
-  const [connectFrom, setConnectFrom] = React.useState<string | null>(null)
   const [stepStatus, setStepStatus] = React.useState<Record<string, string>>({})
   const [msg, setMsg] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
 
-  const selected = steps.find((s) => s.id === selectedId) ?? null
-  const drag = React.useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null)
+  const nodeTypes = React.useMemo<NodeTypes>(() => ({ pipeline: PipelineNode }), [])
+  const selected = nodes.find((n) => n.id === selectedId) ?? null
+  const sel = selected ? pd(selected) : null
 
-  const loadGraph = React.useCallback(async (id: string) => {
-    const g = await pipelineApi.graph(id)
-    setSteps(g.steps)
-    setEdges(g.edges)
-    setSelectedId(null)
-    setConnectFrom(null)
-    const runs = await pipelineApi.runs(id)
-    if (runs[0]) {
-      const d = await pipelineApi.getRun(runs[0].id)
-      setStepStatus(Object.fromEntries((d.step_runs ?? []).map((s) => [s.step_id, s.status])))
-    } else setStepStatus({})
-  }, [])
+  const loadGraph = React.useCallback(
+    async (id: string) => {
+      const g = await pipelineApi.graph(id)
+      setNodes(g.steps.map(stepToNode))
+      setEdges(g.edges.map(toRfEdge))
+      setSelectedId(null)
+      const runs = await pipelineApi.runs(id)
+      if (runs[0]) {
+        const d = await pipelineApi.getRun(runs[0].id)
+        setStepStatus(Object.fromEntries((d.step_runs ?? []).map((s) => [s.step_id, s.status])))
+      } else setStepStatus({})
+    },
+    [setNodes, setEdges],
+  )
 
   React.useEffect(() => {
     ;(async () => {
       try {
-        const [list, ds] = await Promise.all([pipelineApi.list(), dataApi.datasets()])
+        const [list, ds] = await Promise.all([pipelineApi.list(), dataApi.datasets({ pageSize: 100 })])
         setPipelines(list)
-        setDatasets(ds)
+        setDatasets(ds.items)
         if (list[0]) {
           setPid(list[0].id)
           await loadGraph(list[0].id)
@@ -100,76 +156,60 @@ export default function PipelinePage() {
     })()
   }, [loadGraph])
 
+  // reflect run status onto node borders
+  React.useEffect(() => {
+    setNodes((ns) =>
+      ns.map((n) => {
+        const st = stepStatus[n.id]
+        if (pd(n).status === st) return n
+        return { ...n, data: { ...n.data, status: st } }
+      }),
+    )
+  }, [stepStatus, setNodes])
+
   // --- editing ---------------------------------------------------------------
   function addNode(kind: StepKind) {
-    const n = steps.length
-    const step: EditStep = {
+    const i = nodes.length
+    const node: Node = {
       id: newId(),
-      kind,
-      config: { ...DEFAULT_CONFIG[kind] },
-      label: KIND[kind].label,
-      x: 40 + (n % 5) * 40,
-      y: 40 + (n % 5) * 40,
+      type: "pipeline",
+      position: { x: 80 + (i % 5) * 48, y: 60 + (i % 5) * 48 },
+      data: { label: KIND[kind].label, kind, config: { ...DEFAULT_CONFIG[kind] } } as unknown as Record<string, unknown>,
     }
-    setSteps((s) => [...s, step])
-    setSelectedId(step.id)
+    setNodes((ns) => [...ns, node])
+    setSelectedId(node.id)
   }
 
-  function updateSelected(patch: Partial<EditStep>) {
-    setSteps((s) => s.map((st) => (st.id === selectedId ? { ...st, ...patch } : st)))
+  function patchData(patch: Partial<PipeData>) {
+    setNodes((ns) => ns.map((n) => (n.id === selectedId ? { ...n, data: { ...n.data, ...patch } } : n)))
   }
   function updateConfig(key: string, value: unknown) {
-    setSteps((s) =>
-      s.map((st) => (st.id === selectedId ? { ...st, config: { ...st.config, [key]: value } } : st)),
+    setNodes((ns) =>
+      ns.map((n) =>
+        n.id === selectedId ? { ...n, data: { ...n.data, config: { ...pd(n).config, [key]: value } } } : n,
+      ),
     )
   }
   function deleteSelected() {
     if (!selectedId) return
-    setSteps((s) => s.filter((st) => st.id !== selectedId))
-    setEdges((e) => e.filter((ed) => ed.from_step !== selectedId && ed.to_step !== selectedId))
+    setNodes((ns) => ns.filter((n) => n.id !== selectedId))
+    setEdges((es) => es.filter((e) => e.source !== selectedId && e.target !== selectedId))
     setSelectedId(null)
   }
-  function addEdge(from: string, to: string) {
-    if (from === to) return
-    setEdges((e) =>
-      e.some((ed) => ed.from_step === from && ed.to_step === to) ? e : [...e, { from_step: from, to_step: to }],
-    )
-  }
 
-  function onNodeClick(id: string) {
-    if (connectFrom && connectFrom !== id) {
-      addEdge(connectFrom, id)
-      setConnectFrom(null)
-    } else {
-      setSelectedId(id)
-    }
-  }
-
-  // pointer drag to move nodes
-  function onPointerDown(e: React.PointerEvent, step: EditStep) {
-    ;(e.target as Element).setPointerCapture(e.pointerId)
-    drag.current = { id: step.id, sx: e.clientX, sy: e.clientY, ox: step.x, oy: step.y, moved: false }
-  }
-  function onPointerMove(e: React.PointerEvent) {
-    const d = drag.current
-    if (!d) return
-    const dx = e.clientX - d.sx
-    const dy = e.clientY - d.sy
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) d.moved = true
-    setSteps((s) => s.map((st) => (st.id === d.id ? { ...st, x: Math.max(0, d.ox + dx), y: Math.max(0, d.oy + dy) } : st)))
-  }
-  function onPointerUp(step: EditStep) {
-    const d = drag.current
-    drag.current = null
-    if (d && !d.moved) onNodeClick(step.id)
-  }
+  const onConnect = React.useCallback<OnConnect>(
+    (conn) => setEdges((es) => addEdge(conn, es)),
+    [setEdges],
+  )
+  const onNodeClick = React.useCallback((_e: React.MouseEvent, node: Node) => setSelectedId(node.id), [])
 
   // --- actions ---------------------------------------------------------------
-  const graphPayload = (): Graph => ({ steps, edges })
+  const graphPayload = (): Graph => ({ steps: nodes.map(nodeToStep), edges: edges.map(fromRfEdge) })
 
   async function save(): Promise<boolean> {
     if (!pid) return false
-    setBusy(true); setMsg(null)
+    setBusy(true)
+    setMsg(null)
     try {
       await pipelineApi.putGraph(pid, graphPayload())
       setMsg("已保存")
@@ -216,7 +256,10 @@ export default function PipelinePage() {
     const p = await pipelineApi.create(name)
     setPipelines((list) => [p, ...list])
     setPid(p.id)
-    setSteps([]); setEdges([]); setSelectedId(null); setStepStatus({})
+    setNodes([])
+    setEdges([])
+    setSelectedId(null)
+    setStepStatus({})
   }
 
   async function switchPipeline(id: string) {
@@ -239,7 +282,10 @@ export default function PipelinePage() {
         await loadGraph(list[0].id)
       } else {
         setPid("")
-        setSteps([]); setEdges([]); setSelectedId(null); setStepStatus({})
+        setNodes([])
+        setEdges([])
+        setSelectedId(null)
+        setStepStatus({})
       }
       setMsg("已删除")
     } catch (e) {
@@ -250,7 +296,7 @@ export default function PipelinePage() {
   }
 
   return (
-    <PageContainer className="h-full">
+    <PageContainer>
       <PageHeading
         title="管道构建器"
         desc="拖拽节点、连线、配置，编译为 dbt 运行"
@@ -275,9 +321,7 @@ export default function PipelinePage() {
         }
       />
 
-      {msg && (
-        <div className="rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">{msg}</div>
-      )}
+      {msg && <div className="rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">{msg}</div>}
 
       {/* node palette */}
       <div className="flex flex-wrap gap-2">
@@ -289,132 +333,74 @@ export default function PipelinePage() {
             </Button>
           )
         })}
-        {connectFrom && (
-          <Badge variant="info">连线中：点击目标节点（点空白取消）</Badge>
-        )}
+        <Badge variant="outline" className="ml-auto">拖拽节点右侧手柄连线 · 滚轮缩放 · 拖空白平移</Badge>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-        {/* canvas */}
-        <div
-          className="relative min-h-[440px] min-w-0 overflow-auto rounded-xl border border-border bg-[radial-gradient(circle,var(--color-border)_1px,transparent_1px)] [background-size:20px_20px]"
-          onPointerMove={onPointerMove}
-          onClick={() => setConnectFrom(null)}
-        >
-            <div className="relative" style={{ width: 1200, height: 600 }}>
-              <svg className="absolute inset-0 h-full w-full" style={{ pointerEvents: "none" }}>
-                <defs>
-                  <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                    <path d="M0,0 L7,3 L0,6" fill="var(--color-muted-foreground)" />
-                  </marker>
-                </defs>
-                {edges.map((e, i) => {
-                  const a = steps.find((n) => n.id === e.from_step)
-                  const b = steps.find((n) => n.id === e.to_step)
-                  if (!a || !b) return null
-                  const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2
-                  const x2 = b.x, y2 = b.y + NODE_H / 2
-                  const mx = (x1 + x2) / 2
-                  const d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`
-                  return (
-                    <g key={i} style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                       onClick={() => setEdges((es) => es.filter((_, j) => j !== i))}>
-                      <path d={d} fill="none" stroke="transparent" strokeWidth={12} />
-                      <path d={d} fill="none" stroke="var(--color-muted-foreground)" strokeOpacity={0.5}
-                            strokeWidth={1.5} markerEnd="url(#arrow)" />
-                    </g>
-                  )
-                })}
-              </svg>
-
-              {steps.map((n) => {
-                const k = KIND[n.kind]
-                const ring = stepStatus[n.id] ? STATUS_RING[stepStatus[n.id]] : ""
-                const isFrom = connectFrom === n.id
-                return (
-                  <div
-                    key={n.id}
-                    onPointerDown={(e) => onPointerDown(e, n)}
-                    onPointerUp={() => onPointerUp(n)}
-                    className={`absolute z-10 flex touch-none items-center gap-2 rounded-lg border-2 bg-card px-3 shadow-sm ${k.color} ${ring} ${
-                      selectedId === n.id ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""
-                    } ${isFrom ? "ring-2 ring-sky-400" : ""}`}
-                    style={{ left: n.x, top: n.y, width: NODE_W, height: NODE_H, cursor: "grab" }}
-                  >
-                    <k.icon className="size-4 shrink-0" />
-                    <div className="min-w-0 text-left">
-                      <div className="truncate text-sm font-medium text-foreground">{n.label ?? n.id}</div>
-                      <div className="text-[11px] text-muted-foreground">{k.label}</div>
-                    </div>
-                    {/* connect handle */}
-                    <button
-                      title="从此节点连线"
-                      onPointerDown={(e) => { e.stopPropagation() }}
-                      onClick={(e) => { e.stopPropagation(); setConnectFrom(n.id) }}
-                      className="absolute -right-2 top-1/2 size-4 -translate-y-1/2 rounded-full border border-border bg-background hover:bg-emerald-500"
-                    />
-                  </div>
-                )
-              })}
-
-              {steps.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-                  从上方添加节点开始构建
-                </div>
-              )}
-            </div>
-          </div>
+      <div className="grid h-[clamp(380px,52vh,600px)] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <FlowCanvas
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          setNodes={setNodes}
+          onNodeClick={onNodeClick}
+          onPaneClick={() => setSelectedId(null)}
+          direction="LR"
+          emptyHint="从上方添加节点开始构建"
+        />
 
         {/* config panel */}
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
-          {selected ? (
+        <div className="flex flex-col gap-3 overflow-auto rounded-xl border border-border bg-card p-4">
+          {sel ? (
             <>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  {React.createElement(KIND[selected.kind].icon, { className: `size-4 ${KIND[selected.kind].color.split(" ")[1]}` })}
-                  <Badge variant="outline">{KIND[selected.kind].label}</Badge>
+                  {React.createElement(KIND[sel.kind].icon, { className: `size-4 ${KIND[sel.kind].color.split(" ")[1]}` })}
+                  <Badge variant="outline">{KIND[sel.kind].label}</Badge>
                 </div>
                 <Button size="sm" variant="ghost" onClick={deleteSelected}><Trash2Icon /></Button>
               </div>
 
               <Field label="名称">
-                <input value={selected.label ?? ""} onChange={(e) => updateSelected({ label: e.target.value })} className={inputCls} />
+                <input value={sel.label ?? ""} onChange={(e) => patchData({ label: e.target.value })} className={inputCls} />
               </Field>
 
-              {selected.kind === "source" && (
+              {sel.kind === "source" && (
                 <Field label="数据集">
-                  <select value={String(selected.config.dataset_id ?? "")} onChange={(e) => updateConfig("dataset_id", e.target.value)} className={inputCls}>
+                  <select value={String(sel.config.dataset_id ?? "")} onChange={(e) => updateConfig("dataset_id", e.target.value)} className={inputCls}>
                     <option value="">（选择数据集）</option>
                     {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
                 </Field>
               )}
 
-              {selected.kind === "transform" && (
+              {sel.kind === "transform" && (
                 <Field label="SQL（从 input 查询）">
-                  <textarea value={String(selected.config.sql ?? "")} onChange={(e) => updateConfig("sql", e.target.value)} rows={6} className={`${inputCls} font-mono`} />
+                  <textarea value={String(sel.config.sql ?? "")} onChange={(e) => updateConfig("sql", e.target.value)} rows={6} className={`${inputCls} font-mono`} />
                 </Field>
               )}
 
-              {selected.kind === "join" && (
+              {sel.kind === "join" && (
                 <>
                   <Field label="连接类型">
-                    <select value={String(selected.config.type ?? "inner")} onChange={(e) => updateConfig("type", e.target.value)} className={inputCls}>
+                    <select value={String(sel.config.type ?? "inner")} onChange={(e) => updateConfig("type", e.target.value)} className={inputCls}>
                       <option value="inner">inner</option>
                       <option value="left">left</option>
                     </select>
                   </Field>
-                  <Field label="左键"><input value={String(selected.config.left_key ?? "")} onChange={(e) => updateConfig("left_key", e.target.value)} className={inputCls} /></Field>
-                  <Field label="右键"><input value={String(selected.config.right_key ?? "")} onChange={(e) => updateConfig("right_key", e.target.value)} className={inputCls} /></Field>
+                  <Field label="左键"><input value={String(sel.config.left_key ?? "")} onChange={(e) => updateConfig("left_key", e.target.value)} className={inputCls} /></Field>
+                  <Field label="右键"><input value={String(sel.config.right_key ?? "")} onChange={(e) => updateConfig("right_key", e.target.value)} className={inputCls} /></Field>
                 </>
               )}
 
-              {selected.kind === "output" && (
-                <Field label="输出数据集名"><input value={String(selected.config.name ?? "")} onChange={(e) => updateConfig("name", e.target.value)} className={inputCls} /></Field>
+              {sel.kind === "output" && (
+                <Field label="输出数据集名"><input value={String(sel.config.name ?? "")} onChange={(e) => updateConfig("name", e.target.value)} className={inputCls} /></Field>
               )}
             </>
           ) : (
-            <div className="text-sm text-muted-foreground">选择一个节点编辑，或添加新节点。<br />点节点右侧圆点开始连线。</div>
+            <div className="text-sm text-muted-foreground">选择一个节点编辑，或添加新节点。<br />拖节点右侧手柄到目标节点即可连线。</div>
           )}
         </div>
       </div>

@@ -17,7 +17,6 @@ import {
 import { dataApi } from "@/lib/data-api"
 import { ontologyApi } from "@/lib/ontology-api"
 import { pipelineApi } from "@/lib/pipeline-api"
-import { useWorkspace } from "@/components/workspace-context"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
@@ -41,28 +40,29 @@ const KIND_LABEL: Record<Kind, string> = {
 }
 
 export default function HomePage() {
-  const { workspace } = useWorkspace()
   const [tree, setTree] = React.useState<Node[]>([])
   const [stats, setStats] = React.useState({ connectors: 0, datasets: 0, objects: 0, pipelines: 0 })
+  const [loading, setLoading] = React.useState(true)
 
   React.useEffect(() => {
     ;(async () => {
       const [connectors, datasets, graph, pipelines] = await Promise.all([
-        dataApi.connectors().catch(() => []),
-        dataApi.datasets().catch(() => []),
+        dataApi.connectors({ pageSize: 100 }).catch(() => null),
+        dataApi.datasets({ pageSize: 100 }).catch(() => null),
         ontologyApi.graph().catch(() => ({ nodes: [], links: [] })),
         pipelineApi.list().catch(() => []),
       ])
       setStats({
-        connectors: connectors.length,
-        datasets: datasets.length,
+        connectors: connectors?.total ?? 0,
+        datasets: datasets?.total ?? 0,
         objects: graph.nodes.length,
         pipelines: pipelines.length,
       })
+      setLoading(false)
       setTree([
         {
           id: "f-src", name: "数据源", kind: "folder",
-          children: datasets.map((d) => ({ id: d.id, name: d.name, kind: "dataset" as const, owner: d.owner_id ?? "—" })),
+          children: (datasets?.items ?? []).map((d) => ({ id: d.id, name: d.name, kind: "dataset" as const, owner: d.owner_id ?? "—" })),
         },
         {
           id: "f-onto", name: "本体对象", kind: "folder",
@@ -86,8 +86,8 @@ export default function HomePage() {
   return (
     <PageContainer>
       <PageHeading
-        title={workspace.name}
-        desc={`${workspace.desc} · 一切资源挂在同一套本体上，打开工具即操作资源`}
+        title="工作台"
+        desc="统一数据底座 · 一切资源挂在同一套本体上，打开工具即操作资源"
         icon={<BoxesIcon />}
         actions={
           <Button variant="outline" size="sm" render={<Link href="/ontology" />}>
@@ -120,12 +120,14 @@ export default function HomePage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="rounded-lg border border-border">
+            <div className="max-h-[clamp(280px,48vh,520px)] overflow-auto rounded-lg border border-border">
               {tree.map((r) => (
                 <TreeRow key={r.id} node={r} depth={0} />
               ))}
               {tree.every((f) => !f.children?.length) && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground">暂无资源</div>
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  {loading ? "加载中…" : "暂无资源"}
+                </div>
               )}
             </div>
           </CardContent>
@@ -141,7 +143,7 @@ export default function HomePage() {
             {[
               "点开任意资源，查看其血缘、权限与审计",
               "在本体管理器中把数据集建成对象类型并连接关系",
-              "在管道构建器中新建转换，产出分析所需的宽表",
+              "在管道构建中新建转换，产出分析所需的宽表",
             ].map((t, i) => (
               <Link
                 key={i}

@@ -90,7 +90,7 @@ export const APP_LAYERS: AppLayer[] = [
       },
       {
         key: "pipeline",
-        title: "管道构建器",
+        title: "管道构建",
         href: "/pipeline",
         icon: WorkflowIcon,
         desc: "拖拽式数据管道 DAG",

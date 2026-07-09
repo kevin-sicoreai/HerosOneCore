@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.clients import duckdb_loader
 from app.core.config import settings
+from app.core.pagination import paginate
 from app.repositories.models import Connector, Dataset, DatasetColumn
 from app.schemas.dataset import DatasetRegister
 
@@ -20,11 +21,24 @@ def get_or_404(db: Session, dataset_id: str) -> Dataset:
     return dataset
 
 
-def list_all(db: Session, connector_id: str | None = None) -> list[Dataset]:
-    stmt = select(Dataset).order_by(Dataset.created_at.desc())
-    if connector_id is not None:
+def list_page(
+    db: Session,
+    *,
+    page: int,
+    page_size: int,
+    connector_id: str | None = None,
+    layer: str | None = None,
+    q: str | None = None,
+) -> tuple[list[Dataset], int]:
+    stmt = select(Dataset)
+    if connector_id:
         stmt = stmt.where(Dataset.connector_id == connector_id)
-    return list(db.scalars(stmt))
+    if layer:
+        stmt = stmt.where(Dataset.layer == layer)
+    if q:
+        stmt = stmt.where(Dataset.name.ilike(f"%{q}%"))
+    stmt = stmt.order_by(Dataset.created_at.desc())
+    return paginate(db, stmt, page, page_size)
 
 
 def register(db: Session, payload: DatasetRegister) -> Dataset:

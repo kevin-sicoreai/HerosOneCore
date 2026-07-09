@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.clients import duckdb_loader, source_postgres, storage
 from app.core.db import SessionLocal
+from app.core.pagination import paginate
 from app.core.logging import get_logger
 from app.domain.connector_types import is_supported
 from app.domain.enums import ConnectorStatus, SyncStatus
@@ -28,14 +29,19 @@ def get_run_or_404(db: Session, run_id: str) -> SyncRun:
     return run
 
 
-def list_runs(db: Session, connector_id: str) -> list[SyncRun]:
-    return list(
-        db.scalars(
-            select(SyncRun)
-            .where(SyncRun.connector_id == connector_id)
-            .order_by(SyncRun.created_at.desc())
-        )
-    )
+def list_runs_page(
+    db: Session,
+    connector_id: str,
+    *,
+    page: int,
+    page_size: int,
+    status: str | None = None,
+) -> tuple[list[SyncRun], int]:
+    stmt = select(SyncRun).where(SyncRun.connector_id == connector_id)
+    if status:
+        stmt = stmt.where(SyncRun.status == status)
+    stmt = stmt.order_by(SyncRun.created_at.desc())
+    return paginate(db, stmt, page, page_size)
 
 
 def trigger(db: Session, connector: Connector) -> SyncRun:
