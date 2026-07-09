@@ -37,8 +37,8 @@ const TRACE_ICON: Record<TraceIcon, React.ElementType> = {
 
 const SUGGESTIONS = [
   "采购单 128 是什么情况？关联了谁、数据从哪来",
-  "订单 1 关联了哪个客户",
-  "供应商 13 供了哪些采购单，数据血缘是什么",
+  "哪个区域采购额最高？",
+  "各承运商的发运延误率是多少？",
 ]
 
 type UIMessage = {

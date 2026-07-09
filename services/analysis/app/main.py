@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import analysis
+from app.api import analysis, metrics
 from app.core.logging import configure_logging, get_logger
 
 configure_logging()
@@ -21,6 +21,7 @@ app.add_middleware(
 )
 
 app.include_router(analysis.router)
+app.include_router(metrics.router)
 
 
 @app.get("/health", tags=["health"])

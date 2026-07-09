@@ -39,3 +39,12 @@ def list_objects(object_type_id: str, limit: int) -> dict[str, Any]:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def list_link_types() -> list[dict[str, Any]]:
+    """Link types, including join keys (from_property / to_property) — the graph
+    endpoint omits these, so the metric layer reads links from here to resolve
+    cross-object joins."""
+    resp = httpx.get(f"{_base()}/link-types", timeout=_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()

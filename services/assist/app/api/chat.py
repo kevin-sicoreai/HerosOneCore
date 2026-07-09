@@ -35,6 +35,8 @@ TOOL_DISPLAY: dict[str, dict[str, str]] = {
     "get_object": {"icon": "search", "text": "读取对象详情"},
     "get_related_objects": {"icon": "compute", "text": "追溯关联对象"},
     "get_lineage": {"icon": "cite", "text": "查询数据血缘"},
+    "list_metrics": {"icon": "search", "text": "查询可用指标"},
+    "query_metric": {"icon": "compute", "text": "计算业务指标"},
     "write_todos": {"icon": "model", "text": "规划任务步骤"},
 }
 
@@ -88,6 +90,14 @@ def _summarize(name: str, output_text: str) -> tuple[str, list[str]]:
             summary = f"{len(relations)} 类关联 · {total} 个对象"
         elif name == "get_lineage":
             summary = f"上游 {len(data.get('upstream', []))} · 下游 {len(data.get('downstream', []))}"
+        elif name == "list_metrics":
+            summary = f"{data.get('total', 0)} 个指标"
+        elif name == "query_metric":
+            rows = data.get("rows", [])
+            if rows:
+                summary = f"{len(rows)} 组 · 首位 {rows[0]['group']}"
+            else:
+                summary = f"整体 {data.get('total')}"
         if data.get("error"):
             summary = "不可用"
     return summary, sources

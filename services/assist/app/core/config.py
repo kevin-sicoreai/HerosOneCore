@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # avoids Windows' ~2s IPv6 resolution.
     governance_service_url: str = "http://127.0.0.1:8004"
 
+    # Analysis service — the metric semantic layer (cube): named business
+    # metrics and their queryable dimensions. 127.0.0.1 (not localhost)
+    # avoids Windows' ~2s IPv6 resolution.
+    analysis_service_url: str = "http://127.0.0.1:8008"
+
     log_level: str = "INFO"
 
 

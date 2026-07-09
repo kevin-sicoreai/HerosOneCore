@@ -50,6 +50,52 @@ export type AnalyzeResult = {
   matched_rows: number
 }
 
+// --- Metric (cube) layer: named business measures, cross-object joins ---
+
+export type MetricDimension = {
+  key: string
+  label: string
+}
+
+// A named business metric from the cube layer. `agg` is informational for the
+// UI (rate renders as %, sum/count as a number); the join is resolved server-side.
+export type Metric = {
+  key: string
+  label: string
+  description: string
+  base_type: string
+  base_label: string
+  agg: "sum" | "avg" | "count" | "min" | "max" | "rate"
+  unit: string
+  dimensions: MetricDimension[]
+}
+
+export type MetricQueryRequest = {
+  metric: string
+  dimension?: string | null
+  filters?: FilterSpec[]
+  limit?: number
+}
+
+export type MetricGroupRow = {
+  group: string
+  value: number
+}
+
+export type MetricQueryResult = {
+  metric_key: string
+  metric_label: string
+  dimension_key: string | null
+  dimension_label: string | null
+  agg: string
+  unit: string
+  // One row per group, sorted by value desc; chart-ready.
+  rows: MetricGroupRow[]
+  total: number
+  matched_rows: number
+  meta: Record<string, unknown>
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${ANALYSIS_API}${path}`, {
     headers: { "content-type": "application/json" },
@@ -63,4 +109,7 @@ export const analysisApi = {
   tables: () => req<AnalysisTable[]>("/tables"),
   analyze: (body: AnalyzeRequest) =>
     req<AnalyzeResult>("/analyze", { method: "POST", body: JSON.stringify(body) }),
+  metrics: () => req<Metric[]>("/metrics"),
+  queryMetric: (body: MetricQueryRequest) =>
+    req<MetricQueryResult>("/metrics/query", { method: "POST", body: JSON.stringify(body) }),
 }

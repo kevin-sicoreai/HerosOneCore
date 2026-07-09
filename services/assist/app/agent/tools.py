@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 from langchain_core.tools import tool
 
-from app.clients import governance_service, ontology_service
+from app.clients import analysis_service, governance_service, ontology_service
 
 _UNAVAILABLE = json.dumps({"error": "本体服务不可用，无法查询对象类型"}, ensure_ascii=False)
 
@@ -262,6 +262,83 @@ def get_lineage(object_type: str) -> str:
     )
 
 
+@tool
+def list_metrics() -> str:
+    """列出平台可计算的命名业务指标（指标语义层 / cube）。当用户问「哪个X最高/最多」「按Y统计Z」这类聚合/排名/占比问题时，先用它查有哪些指标和可切分的维度。
+
+    Returns:
+        JSON：{"total", "metrics": [{"key","label","description","base_label","unit","agg","dimensions":[{"key","label"}]}], "source":"指标层"}。
+    """
+    try:
+        metrics = analysis_service.list_metrics()
+    except httpx.HTTPError:
+        return json.dumps({"error": "分析服务不可用，无法查询指标"}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "total": len(metrics),
+            "metrics": [
+                {
+                    "key": m.get("key"),
+                    "label": m.get("label"),
+                    "description": m.get("description"),
+                    "base_label": m.get("base_label"),
+                    "unit": m.get("unit"),
+                    "agg": m.get("agg"),
+                    "dimensions": [
+                        {"key": d.get("key"), "label": d.get("label")}
+                        for d in m.get("dimensions", [])
+                    ],
+                }
+                for m in metrics
+            ],
+            "source": "指标层",
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+@tool
+def query_metric(
+    metric: str, dimension: str = "", filter_field: str = "", filter_value: str = ""
+) -> str:
+    """计算一个命名业务指标，可选按某维度分组、可选单条等值过滤。用于回答指标类问题（如「哪个区域采购额最高」→ metric=purchase_total, dimension=supplier_region）。
+
+    Args:
+        metric: 指标 key（来自 list_metrics，如 purchase_total）。
+        dimension: 维度 key（该指标 dimensions 里的 key，如 supplier_region）；留空=整体值。
+        filter_field / filter_value: 可选，对基础对象类型某属性做等值过滤（如 filter_field="status", filter_value="已完成"）；都留空=不过滤。
+
+    Returns:
+        JSON：{"metric","dimension","unit","agg","total","matched_rows","rows":[{"group","value"}]（降序，最多前 20 条），"source"}。
+    """
+    filters = (
+        [{"field": filter_field, "op": "eq", "value": filter_value}]
+        if filter_field and filter_value
+        else []
+    )
+    try:
+        data = analysis_service.query_metric(
+            metric, dimension or None, filters, 20
+        )
+    except httpx.HTTPError:
+        return json.dumps({"error": "分析服务不可用，无法计算指标"}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "metric": data.get("metric_label"),
+            "dimension": data.get("dimension_label"),
+            "unit": data.get("unit"),
+            "agg": data.get("agg"),
+            "total": data.get("total"),
+            "matched_rows": data.get("matched_rows"),
+            "rows": data.get("rows", [])[:20],
+            "source": data.get("metric_label"),
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+
+
 AGENT_TOOLS = [
     list_object_types,
     search_objects,
@@ -269,4 +346,6 @@ AGENT_TOOLS = [
     get_related_objects,
     get_lineage,
     get_object_type_schema,
+    list_metrics,
+    query_metric,
 ]

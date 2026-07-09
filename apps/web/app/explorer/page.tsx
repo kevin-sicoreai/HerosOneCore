@@ -5,9 +5,11 @@ import {
   BoxesIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
+  FilterIcon,
   Loader2Icon,
   SearchIcon,
   Share2Icon,
+  XIcon,
 } from "lucide-react"
 
 import { ontologyApi, type GraphNode, type OntologyGraph } from "@/lib/ontology-api"
@@ -164,8 +166,23 @@ export default function ExplorerPage() {
   )
 }
 
-// List mode: the selected type's instances, searchable. Clicking a row enters
-// that object's focus (Object View) rather than opening the governance drawer.
+// How many instance rows to load for browsing + faceting. Higher than the old
+// cap so facet value distributions are representative.
+const INSTANCE_LIMIT = 500
+// A property qualifies as a facet only when its distinct value count sits in this
+// window — enough variety to filter by, but not a high-cardinality/unique column.
+const FACET_MIN_DISTINCT = 2
+const FACET_MAX_DISTINCT = 15
+// Cap on the number of facet properties and the values shown per facet.
+const FACET_MAX = 5
+const FACET_VALUES_SHOWN = 8
+
+// One filterable property and its value distribution, derived from loaded rows.
+type Facet = { col: string; values: { value: string; count: number }[] }
+
+// List mode: the selected type's instances, searchable and filterable by property
+// facets. Clicking a row enters that object's focus (Object View) rather than
+// opening the governance drawer.
 function InstanceList({
   focus,
   pkColOf,
@@ -181,16 +198,22 @@ function InstanceList({
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [q, setQ] = React.useState("")
+  // col -> selected values. Values within one facet OR together; facets AND.
+  const [selected, setSelected] = React.useState<Record<string, Set<string>>>({})
+  // Facets showing all their values rather than the top FACET_VALUES_SHOWN.
+  const [expandedFacets, setExpandedFacets] = React.useState<Record<string, boolean>>({})
 
   React.useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
     setQ("")
+    setSelected({})
+    setExpandedFacets({})
     ;(async () => {
       try {
         const col = await pkColOf(focus.id)
-        const list = await ontologyApi.objects(focus.id, 100)
+        const list = await ontologyApi.objects(focus.id, INSTANCE_LIMIT)
         if (cancelled) return
         setPkCol(col)
         setColumns(list.columns)
@@ -207,13 +230,70 @@ function InstanceList({
   }, [focus.id, pkColOf])
 
   const labelOf = (r: Record<string, unknown>) => (r["name"] ? String(r["name"]) : String(r[pkCol]))
-  const filtered = rows.filter(
-    (r) => q === "" || Object.values(r).some((v) => String(v ?? "").toLowerCase().includes(q.toLowerCase()))
+
+  // Derive facets from the loaded rows: string columns whose distinct-value count
+  // falls in the facet window (excludes the primary key and high-cardinality cols).
+  const facets = React.useMemo<Facet[]>(() => {
+    const out: Facet[] = []
+    for (const col of columns) {
+      if (col === pkCol) continue
+      const counts = new Map<string, number>()
+      let numericOrEmpty = false
+      for (const r of rows) {
+        const v = r[col]
+        if (v === null || v === undefined || v === "") continue
+        // Only facet on string dimensions; numeric columns are treated as
+        // high-cardinality measures and skipped.
+        if (typeof v !== "string") {
+          numericOrEmpty = true
+          break
+        }
+        counts.set(v, (counts.get(v) ?? 0) + 1)
+      }
+      if (numericOrEmpty) continue
+      if (counts.size < FACET_MIN_DISTINCT || counts.size > FACET_MAX_DISTINCT) continue
+      const values = [...counts.entries()]
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count)
+      out.push({ col, values })
+      if (out.length >= FACET_MAX) break
+    }
+    return out
+  }, [columns, rows, pkCol])
+
+  const activeFacets = React.useMemo(
+    () => Object.entries(selected).filter(([, set]) => set.size > 0),
+    [selected]
   )
+
+  const filtered = rows.filter((r) => {
+    if (
+      q !== "" &&
+      !Object.values(r).some((v) => String(v ?? "").toLowerCase().includes(q.toLowerCase()))
+    )
+      return false
+    // AND across facets, OR within a facet's selected values.
+    for (const [col, set] of activeFacets) {
+      if (!set.has(String(r[col] ?? ""))) return false
+    }
+    return true
+  })
+
+  function toggleFacet(col: string, value: string) {
+    setSelected((prev) => {
+      const next = { ...prev }
+      const set = new Set(next[col] ?? [])
+      if (set.has(value)) set.delete(value)
+      else set.add(value)
+      if (set.size === 0) delete next[col]
+      else next[col] = set
+      return next
+    })
+  }
 
   return (
     <>
-      <div className="flex items-center gap-2 border-b border-border p-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
         <div className="relative w-full max-w-xs">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -223,56 +303,124 @@ function InstanceList({
             className="h-8 w-full rounded-lg border border-input bg-transparent pr-2 pl-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
           />
         </div>
+        {/* Active facet filters as removable chips */}
+        {activeFacets.flatMap(([col, set]) =>
+          [...set].map((value) => (
+            <button
+              key={`${col}:${value}`}
+              onClick={() => toggleFacet(col, value)}
+              className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+            >
+              <span className="text-muted-foreground">{fieldLabel(col)}:</span>
+              {value}
+              <XIcon className="size-3" />
+            </button>
+          ))
+        )}
         <span className="ml-auto text-xs text-muted-foreground">{filtered.length} 个对象</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-            <Loader2Icon className="size-4 animate-spin" /> 加载实例…
-          </div>
-        ) : error ? (
-          <div className="py-10 text-center text-sm text-red-500">{error}</div>
-        ) : (
-          <>
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
-                <tr className="border-b border-border">
-                  {columns.map((c) => (
-                    <th key={c} className="px-3 py-2 text-left font-medium">
-                      {fieldLabel(c)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => (
-                  <tr
-                    key={i}
-                    onClick={() =>
-                      onPick({
-                        otId: focus.id,
-                        pk: String(r[pkCol]),
-                        label: labelOf(r),
-                        typeName: focus.display_name,
-                        color: focus.color,
-                        row: r,
-                      })
-                    }
-                    className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
-                  >
-                    {columns.map((c, j) => (
-                      <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
-                        {String(r[c] ?? "")}
-                      </td>
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* Table */}
+        <div className="order-2 min-h-0 flex-1 overflow-auto lg:order-1">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" /> 加载实例…
+            </div>
+          ) : error ? (
+            <div className="py-10 text-center text-sm text-red-500">{error}</div>
+          ) : (
+            <>
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
+                  <tr className="border-b border-border">
+                    {columns.map((c) => (
+                      <th key={c} className="px-3 py-2 text-left font-medium">
+                        {fieldLabel(c)}
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {filtered.length === 0 && (
-              <div className="p-6 text-center text-sm text-muted-foreground">无匹配对象</div>
-            )}
-          </>
+                </thead>
+                <tbody>
+                  {filtered.map((r, i) => (
+                    <tr
+                      key={i}
+                      onClick={() =>
+                        onPick({
+                          otId: focus.id,
+                          pk: String(r[pkCol]),
+                          label: labelOf(r),
+                          typeName: focus.display_name,
+                          color: focus.color,
+                          row: r,
+                        })
+                      }
+                      className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
+                    >
+                      {columns.map((c, j) => (
+                        <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
+                          {String(r[c] ?? "")}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filtered.length === 0 && (
+                <div className="p-6 text-center text-sm text-muted-foreground">无匹配对象</div>
+              )}
+            </>
+          )}
+        </div>
+        {/* Facet panel */}
+        {!loading && !error && facets.length > 0 && (
+          <div className="order-1 max-h-64 shrink-0 space-y-4 overflow-auto border-b border-border p-3 lg:order-2 lg:max-h-none lg:w-[220px] lg:border-b-0 lg:border-l">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <FilterIcon className="size-3.5" /> 筛选
+            </div>
+            {facets.map((f) => {
+              const sel = selected[f.col]
+              const expanded = expandedFacets[f.col]
+              const shown = expanded ? f.values : f.values.slice(0, FACET_VALUES_SHOWN)
+              const hidden = f.values.length - shown.length
+              return (
+                <div key={f.col}>
+                  <div className="mb-1 text-xs font-medium text-foreground">{fieldLabel(f.col)}</div>
+                  <div className="space-y-0.5">
+                    {shown.map((v) => {
+                      const on = sel?.has(v.value) ?? false
+                      return (
+                        <button
+                          key={v.value}
+                          onClick={() => toggleFacet(f.col, v.value)}
+                          className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-xs transition-colors ${
+                            on
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : "hover:bg-muted"
+                          }`}
+                        >
+                          <span className="truncate text-left">{v.value}</span>
+                          <span className={on ? "shrink-0" : "shrink-0 text-muted-foreground"}>{v.count}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {(hidden > 0 || expanded) && f.values.length > FACET_VALUES_SHOWN && (
+                    <button
+                      onClick={() =>
+                        setExpandedFacets((prev) => ({ ...prev, [f.col]: !prev[f.col] }))
+                      }
+                      className="mt-0.5 px-2 text-xs text-emerald-600 transition-colors hover:underline dark:text-emerald-400"
+                    >
+                      {expanded ? "收起" : `还有 ${hidden} 项`}
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            <div className="border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+              基于已加载的前 {rows.length} 行
+            </div>
+          </div>
         )}
       </div>
     </>
@@ -385,17 +533,26 @@ function ObjectView({
           {links.length === 0 ? (
             <div className="py-6 text-center text-sm text-muted-foreground">该对象类型没有定义关系</div>
           ) : (
-            links.map((link) => (
-              <RelationBlock
-                key={`${cur.otId}:${cur.pk}:${link.id}`}
-                cur={cur}
-                linkId={link.id}
-                linkName={link.display_name}
-                typeMap={typeMap}
-                pkColOf={pkColOf}
-                onPush={onPush}
-              />
-            ))
+            links.map((link) => {
+              // The link model carries only a forward name. When the focused
+              // object sits on the link's `to` side, the relation reads in
+              // reverse, so the block must phrase its title accordingly.
+              // Self-links (from === to) count as forward.
+              const reverse =
+                link.from_object_type_id !== cur.otId && link.to_object_type_id === cur.otId
+              return (
+                <RelationBlock
+                  key={`${cur.otId}:${cur.pk}:${link.id}`}
+                  cur={cur}
+                  linkId={link.id}
+                  linkName={link.display_name}
+                  reverse={reverse}
+                  typeMap={typeMap}
+                  pkColOf={pkColOf}
+                  onPush={onPush}
+                />
+              )
+            })
           )}
         </div>
       </div>
@@ -410,6 +567,7 @@ function RelationBlock({
   cur,
   linkId,
   linkName,
+  reverse,
   typeMap,
   pkColOf,
   onPush,
@@ -417,6 +575,7 @@ function RelationBlock({
   cur: FocusObj
   linkId: string
   linkName: string
+  reverse: boolean
   typeMap: Map<string, GraphNode>
   pkColOf: (otId: string) => Promise<string>
   onPush: (f: FocusObj) => void
@@ -486,8 +645,19 @@ function RelationBlock({
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2 text-sm">
           <Share2Icon className="size-3.5 text-muted-foreground" />
-          <span className="font-medium">{linkName}</span>
-          <span className="text-muted-foreground">· {otherName}</span>
+          {reverse ? (
+            // Focused object is on the link's `to` side: lead with the peer type
+            // and label this side as the inverse role.
+            <>
+              <span className="font-medium">{otherName}</span>
+              <span className="text-muted-foreground">· 以此为{linkName}</span>
+            </>
+          ) : (
+            <>
+              <span className="font-medium">{linkName}</span>
+              <span className="text-muted-foreground">· {otherName}</span>
+            </>
+          )}
         </div>
         <Badge variant="outline">{overflow && !expanded ? `${REL_CAP}+` : rows.length}</Badge>
       </div>
