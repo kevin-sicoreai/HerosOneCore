@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -27,6 +27,27 @@ class Role(Base):
     can_write: Mapped[bool] = mapped_column(Boolean, default=False)
     can_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SensitiveColumn(Base):
+    """A column flagged as sensitive — the source of truth for column-level masking.
+
+    ``dataset_name`` is a dataset identifier: it is matched loosely (against both
+    the data-service dataset id and its human name), so the ontology and data
+    services can resolve it by whichever they have on hand.
+    """
+
+    __tablename__ = "sensitive_columns"
+    __table_args__ = (
+        UniqueConstraint("dataset_name", "column_name", name="uq_sensitive_column"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    dataset_name: Mapped[str] = mapped_column(String(255), nullable=False)  # source dataset/table (e.g. "employees")
+    column_name: Mapped[str] = mapped_column(String(255), nullable=False)   # column (e.g. "monthly_salary")
+    level: Mapped[str] = mapped_column(String(64), nullable=False)          # classification label (e.g. "PII-薪酬")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class AuditEvent(Base):

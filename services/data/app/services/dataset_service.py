@@ -11,7 +11,7 @@ from app.clients import duckdb_loader
 from app.core.config import settings
 from app.core.pagination import paginate
 from app.repositories.models import Connector, Dataset, DatasetColumn
-from app.schemas.dataset import DatasetRegister
+from app.schemas.dataset import DatasetPatch, DatasetRegister
 
 
 def get_or_404(db: Session, dataset_id: str) -> Dataset:
@@ -55,6 +55,10 @@ def register(db: Session, payload: DatasetRegister) -> Dataset:
     dataset.storage_uri = payload.storage_uri
     dataset.layer = payload.layer
     dataset.row_count = payload.row_count
+    # Only overwrite the display name when the caller supplies one, so re-registers
+    # (upsert by name) don't wipe a name backfilled via PATCH.
+    if payload.display_name is not None:
+        dataset.display_name = payload.display_name
     dataset.last_synced_at = datetime.now(timezone.utc)
 
     dataset.columns.clear()
@@ -63,6 +67,19 @@ def register(db: Session, payload: DatasetRegister) -> Dataset:
         dataset.columns.append(
             DatasetColumn(name=col.name, data_type=col.data_type, nullable=col.nullable, ordinal=ordinal)
         )
+    db.commit()
+    db.refresh(dataset)
+    return dataset
+
+
+def update(db: Session, dataset_id: str, payload: DatasetPatch) -> Dataset:
+    """Partially update a dataset's identifiers (name / display_name)."""
+    dataset = get_or_404(db, dataset_id)
+    fields = payload.model_dump(exclude_unset=True)
+    if "name" in fields:
+        dataset.name = fields["name"]
+    if "display_name" in fields:
+        dataset.display_name = fields["display_name"]
     db.commit()
     db.refresh(dataset)
     return dataset

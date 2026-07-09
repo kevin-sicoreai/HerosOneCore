@@ -11,13 +11,12 @@ router = APIRouter(tags=["metrics"])
 # Display labels for base object types (api_name -> Chinese). Kept local to the
 # metric layer so its catalog reads in business terms.
 _BASE_LABELS = {
-    "PurchaseOrder": "采购单",
-    "Shipment": "发运单",
-    "Product": "产品",
-    "Order": "订单",
-    "Supplier": "供应商",
-    "Warehouse": "仓库",
-    "Customer": "客户",
+    "employee": "员工",
+    "department": "部门",
+    "position": "职位",
+    "performance_review": "绩效考核",
+    "application": "招聘投递",
+    "training_record": "培训记录",
 }
 
 

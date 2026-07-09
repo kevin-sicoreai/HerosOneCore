@@ -1,12 +1,26 @@
 """Governance endpoints: lineage, audit, roles, stats."""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_token
 from app.core.db import get_db
-from app.schemas.governance import AuditEntry, AuditEventIn, Lineage, RoleOut, Stats
-from app.services import audit_service, lineage_service, roles_service, stats_service
+from app.schemas.governance import (
+    AuditEntry,
+    AuditEventIn,
+    ClassificationIn,
+    ClassificationOut,
+    Lineage,
+    RoleOut,
+    Stats,
+)
+from app.services import (
+    audit_service,
+    classifications_service,
+    lineage_service,
+    roles_service,
+    stats_service,
+)
 
 router = APIRouter(tags=["governance"])
 
@@ -39,3 +53,29 @@ def get_roles(db: Session = Depends(get_db)) -> list[RoleOut]:
 @router.get("/stats", response_model=Stats)
 def get_stats(db: Session = Depends(get_db)) -> Stats:
     return stats_service.build(db)
+
+
+@router.get("/classifications", response_model=list[ClassificationOut])
+def get_classifications(db: Session = Depends(get_db)) -> list[ClassificationOut]:
+    """Full list of sensitive-column classifications (open read)."""
+    return [ClassificationOut.model_validate(c) for c in classifications_service.list_all(db)]
+
+
+@router.post("/classifications", response_model=ClassificationOut)
+def upsert_classification(
+    payload: ClassificationIn,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_token),
+) -> ClassificationOut:
+    """Register a sensitive column. Idempotent on (dataset_name, column_name)."""
+    return ClassificationOut.model_validate(classifications_service.upsert(db, payload))
+
+
+@router.delete("/classifications/{classification_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_classification(
+    classification_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_token),
+) -> None:
+    if not classifications_service.delete(db, classification_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Classification not found")

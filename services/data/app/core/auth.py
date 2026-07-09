@@ -92,3 +92,14 @@ def actor_from_authorization(authorization: str | None) -> str:
     except HTTPException:
         return "anonymous"
     return payload.get("username") or payload.get("sub") or "anonymous"
+
+
+def perms_from_authorization(authorization: str | None) -> dict:
+    """Best-effort perms dict ({can_read, can_write, can_admin}) from a Bearer token; {} if absent/invalid."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return {}
+    try:
+        payload = _decode(authorization.split(" ", 1)[1])
+    except HTTPException:
+        return {}
+    return payload.get("perms") or {}

@@ -10,7 +10,9 @@ scripts/
 ├── seed/        data seeding into the source database
 │   ├── seed_base.sql         customers + orders (sales)
 │   ├── seed_supply_chain.sql suppliers/warehouses/products/inventory/PO/shipments
-│   └── seed.sh               apply both into the source db (idempotent)
+│   ├── seed.sh               apply both into the source db (idempotent)
+│   ├── seed_hr.sql           HR 场景:14 张表(员工/考勤/薪酬/招聘/绩效/培训/晋升/调动/请假/面试/合同)
+│   └── seed_hr.sh            建 hr 库并灌入 HR 数据(独立于 seed.sh,幂等)
 └── services/    start the microservices (each auto-creates its own metadata DB)
     ├── start_data.sh         data service        (:8000, sqlite dev.db)
     ├── start_pipeline.sh     pipeline service    (:8001, sqlite pipeline.db)  [Python 3.12]
@@ -47,6 +49,16 @@ scripts/infra/start_airflow.sh
 # 4. frontend
 cd apps/web && npm run dev
 ```
+
+## HR 场景种子(场景二)
+
+大厂人事系统的大体量演示数据(约 20000 名员工、70 万条考勤等),灌入源库上独立的 `hr` 数据库,与供应链场景(`seed.sh`)互不影响、可重复执行:
+
+```bash
+scripts/seed/seed_hr.sh
+```
+
+脚本会先幂等地创建 `hr` 库,再应用 `seed_hr.sql`(14 张表:departments / positions / employees / attendance / payroll / applications / performance_reviews / trainings / training_records / promotions / transfers / leaves / interviews / contracts),末尾打印各表行数校验。无 Docker 时用 `USE_PSQL=1` 直连(见脚本头部注释)。
 
 Notes:
 - Service start scripts run in the foreground; pass extra uvicorn args, e.g.

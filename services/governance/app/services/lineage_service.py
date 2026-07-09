@@ -40,7 +40,9 @@ def build() -> Lineage:
     mart_by_uri: dict[str, str] = {}
     for d in upstream.list_datasets():
         is_mart = d.get("layer") == "mart"
-        did = add_node(f"dataset:{d['id']}", "mart" if is_mart else "dataset", d["name"])
+        # Prefer the Chinese display name for the label; fall back to English name.
+        label = d.get("display_name") or d["name"]
+        did = add_node(f"dataset:{d['id']}", "mart" if is_mart else "dataset", label)
         if d.get("connector_id"):
             add_edge(f"connector:{d['connector_id']}", did)  # no-op for hidden internal connector
         if is_mart and d.get("storage_uri"):

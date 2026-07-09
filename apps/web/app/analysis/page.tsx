@@ -4,7 +4,11 @@ import * as React from "react"
 import {
   BarChart3Icon,
   CalendarClockIcon,
+  ChevronDownIcon,
+  ChevronsUpDownIcon,
+  ChevronUpIcon,
   FilterIcon,
+  Loader2Icon,
   MapIcon,
   PlusIcon,
   RadarIcon,
@@ -28,6 +32,7 @@ import {
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Pagination } from "@/components/ui/pagination"
 
 // A lens is one way of looking at the current object set. The relationship
 // (schema) graph lives in the ontology manager, not here.
@@ -39,6 +44,11 @@ const LENSES: { key: Lens; label: string; icon: React.ElementType }[] = [
   { key: "timeline", label: "时间轴", icon: CalendarClockIcon },
   { key: "map", label: "地图", icon: MapIcon },
 ]
+
+// Detail-table server-side page size. The timeline pulls a small newest-first
+// slice instead of the full object set; the map uses a server-side count aggregate.
+const DETAIL_PAGE_SIZE = 100
+const TIMELINE_LIMIT = 200
 
 const AGG_OPTIONS: { value: MetricAgg; label: string }[] = [
   { value: "avg", label: "平均" },
@@ -61,6 +71,15 @@ const SELECT_BASE =
 // Full-width variant for single-column selects. Fixed/flex selects use
 // SELECT_BASE directly to avoid a w-full vs w-* class conflict.
 const SELECT_CLASS = `w-full ${SELECT_BASE}`
+
+// Numeric source SQL types (mirrors the analysis service's _NUMERIC_TYPES).
+// Used to right-align numeric detail columns even when the column is a
+// dimension (e.g. an integer id kept as a dimension).
+const NUMERIC_DATA_TYPE = /^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)/i
+
+function isNumericColumn(c: AnalysisColumn): boolean {
+  return c.kind === "measure" || (!!c.data_type && NUMERIC_DATA_TYPE.test(c.data_type))
+}
 
 function formatValue(v: number | string): string {
   if (typeof v !== "number") return String(v)
@@ -86,9 +105,17 @@ export default function AnalysisPage() {
   const [metrics, setMetrics] = React.useState<MetricSpec[]>([])
   const [filters, setFilters] = React.useState<FilterSpec[]>([])
   const [result, setResult] = React.useState<AnalyzeResult | null>(null)
-  // Shared "current object set" detail rows: the same filtered records feed the
-  // timeline/map lenses, so switching lens only changes the view, not the data.
-  const [detailRows, setDetailRows] = React.useState<Record<string, unknown>[]>([])
+  // Detail-table page (table lens, detail mode). Reset to 1 on any query change.
+  const [page, setPage] = React.useState(1)
+  // Detail-table server-side sort. null = no sort (service default order).
+  const [orderBy, setOrderBy] = React.useState<string | null>(null)
+  const [orderDir, setOrderDir] = React.useState<"asc" | "desc">("asc")
+  // Main-query in-flight flag: dims the table (keeping old rows) while fetching.
+  const [loading, setLoading] = React.useState(false)
+  // Timeline: a small newest-first slice fetched on demand (not the full set).
+  const [timelineRows, setTimelineRows] = React.useState<Record<string, unknown>[]>([])
+  // Map: server-side count-per-geo aggregate, {value,count} per location.
+  const [geoCounts, setGeoCounts] = React.useState<{ value: string; count: number }[]>([])
   const [lens, setLens] = React.useState<Lens>("table")
   // Chart (cube-metric) lens state.
   const [chartMetricKey, setChartMetricKey] = React.useState<string>("")
@@ -145,6 +172,9 @@ export default function AnalysisPage() {
     setMetrics([])
     setFilters([])
     setResult(null)
+    // Clear the detail sort — the column names differ across object types.
+    setOrderBy(null)
+    setOrderDir("asc")
     // Reset the chart lens selection; it repopulates from the new type's metrics.
     setChartMetricKey("")
     setChartDimKey("")
@@ -169,29 +199,43 @@ export default function AnalysisPage() {
     }
   }, [chartMetrics, chartMetricKey])
 
+  // Reset to the first page whenever the query shape changes (object type,
+  // filters, group/measures, or lens), so the pager never lands out of range.
+  React.useEffect(() => {
+    setPage(1)
+  }, [tableName, filters, groupBy, metrics, lens])
+
   // Auto-run the aggregation on any config change (debounced). No metrics =
-  // detail mode: the service returns the filtered rows as-is.
+  // detail mode: the service returns one page of filtered rows (page_size 100).
   React.useEffect(() => {
     if (!tableName) return
     const timer = window.setTimeout(() => {
+      setLoading(true)
       analysisApi
         .analyze({
           table: tableName,
           group_by: metrics.length === 0 ? null : groupBy || null,
           metrics,
           filters: filters.filter((f) => String(f.value).trim() !== ""),
+          page,
+          page_size: DETAIL_PAGE_SIZE,
+          // Sorting only applies to detail mode; the service ignores it when
+          // aggregating (aggregate results already come back sorted).
+          order_by: metrics.length === 0 ? orderBy : null,
+          order_dir: orderDir,
         })
         .then(setResult)
         .catch(() => setOffline(true))
+        .finally(() => setLoading(false))
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [tableName, groupBy, metrics, filters])
+  }, [tableName, groupBy, metrics, filters, page, orderBy, orderDir])
 
-  // Keep the shared object set in sync with the current type + filters. Detail
-  // mode is cheap (<=1000 rows); timeline/map read from these rows.
+  // Timeline lens: pull only the newest TIMELINE_LIMIT records, ordered by the
+  // time property server-side — no full-set download.
   React.useEffect(() => {
-    if (!tableName) {
-      setDetailRows([])
+    if (lens !== "timeline" || !tableName || !timeCol) {
+      setTimelineRows([])
       return
     }
     const timer = window.setTimeout(() => {
@@ -201,12 +245,44 @@ export default function AnalysisPage() {
           group_by: null,
           metrics: [],
           filters: filters.filter((f) => String(f.value).trim() !== ""),
+          page: 1,
+          page_size: TIMELINE_LIMIT,
+          order_by: timeCol.name,
+          order_dir: "desc",
         })
-        .then((r) => setDetailRows(r.rows as Record<string, unknown>[]))
+        .then((r) => setTimelineRows(r.rows as Record<string, unknown>[]))
         .catch(() => setOffline(true))
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [tableName, filters])
+  }, [lens, tableName, filters, timeCol])
+
+  // Map lens: server-side count-per-geo aggregate (small payload) instead of
+  // counting a full detail set on the client.
+  React.useEffect(() => {
+    if (lens !== "map" || !tableName || !geoCol) {
+      setGeoCounts([])
+      return
+    }
+    const timer = window.setTimeout(() => {
+      analysisApi
+        .analyze({
+          table: tableName,
+          group_by: geoCol.name,
+          metrics: [{ field: geoCol.name, agg: "count" }],
+          filters: filters.filter((f) => String(f.value).trim() !== ""),
+        })
+        .then((r) =>
+          setGeoCounts(
+            r.rows.map((row) => ({
+              value: String(row.group ?? ""),
+              count: Number(row.m0 ?? 0),
+            }))
+          )
+        )
+        .catch(() => setOffline(true))
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [lens, tableName, filters, geoCol])
 
   // Chart lens: query the selected cube metric (debounced) on any change.
   React.useEffect(() => {
@@ -232,6 +308,21 @@ export default function AnalysisPage() {
     if (!geoCol) return
     setFilters([{ field: geoCol.name, op: "eq", value }])
     setLens("table")
+  }
+
+  // Cycle a detail column's sort on header click: none → asc → desc → none.
+  // Any sort change resets to the first page so the pager never lands out of range.
+  function toggleSort(colName: string) {
+    setPage(1)
+    if (orderBy !== colName) {
+      setOrderBy(colName)
+      setOrderDir("asc")
+    } else if (orderDir === "asc") {
+      setOrderDir("desc")
+    } else {
+      setOrderBy(null)
+      setOrderDir("asc")
+    }
   }
 
   function addFilter() {
@@ -427,7 +518,9 @@ export default function AnalysisPage() {
               })}
             </div>
             <div className="ml-auto truncate text-xs text-muted-foreground">
-              {table ? `分析上下文：${table.label} · 命中 ${detailRows.length} 行` : ""}
+              {table
+                ? `分析上下文：${table.label} · 命中 ${(result?.matched_rows ?? 0).toLocaleString()} 行`
+                : ""}
             </div>
           </div>
 
@@ -439,13 +532,42 @@ export default function AnalysisPage() {
 
           {/* Data area — takes all remaining height in the right column. */}
           {lens === "table" && (
-            <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card">
-              {!result ? (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  {offline ? "分析服务未启动" : "选择对象类型开始分析"}
-                </div>
-              ) : (
-                <ResultTable result={result} table={table} />
+            <div className="relative flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card">
+              {/* Lightweight in-flight hint: a thin top bar plus a corner spinner.
+                  Old rows stay visible (dimmed) so the table never flashes empty. */}
+              {loading && (
+                <>
+                  <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 animate-pulse rounded-t-xl bg-emerald-500/70" />
+                  <Loader2Icon className="pointer-events-none absolute top-2 right-2 z-10 size-4 animate-spin text-emerald-500" />
+                </>
+              )}
+              <div
+                className={`min-h-0 flex-1 overflow-auto transition-opacity ${loading ? "opacity-60" : ""}`}
+              >
+                {!result ? (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    {offline ? "分析服务未启动" : "选择对象类型开始分析"}
+                  </div>
+                ) : (
+                  <ResultTable
+                    result={result}
+                    table={table}
+                    orderBy={orderBy}
+                    orderDir={orderDir}
+                    onSort={toggleSort}
+                  />
+                )}
+              </div>
+              {/* Detail-mode pager: server-side pages of DETAIL_PAGE_SIZE rows. */}
+              {result?.mode === "detail" && result.matched_rows > 0 && (
+                <Pagination
+                  page={page}
+                  pageSize={DETAIL_PAGE_SIZE}
+                  total={result.matched_rows}
+                  pages={Math.max(1, Math.ceil(result.matched_rows / DETAIL_PAGE_SIZE))}
+                  onPageChange={setPage}
+                  className="shrink-0 border-t border-border"
+                />
               )}
             </div>
           )}
@@ -457,14 +579,14 @@ export default function AnalysisPage() {
           {lens === "timeline" && (
             <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
               {timeCol ? (
-                <TimelineView detailRows={detailRows} columns={table?.columns ?? []} timeCol={timeCol} />
+                <TimelineView rows={timelineRows} columns={table?.columns ?? []} timeCol={timeCol} />
               ) : null}
             </div>
           )}
 
           {lens === "map" && (
             <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-              {geoCol ? <MapView detailRows={detailRows} geoCol={geoCol} onDrill={drillGeo} /> : null}
+              {geoCol ? <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} /> : null}
             </div>
           )}
         </div>
@@ -726,29 +848,84 @@ function ChartCanvas({
   )
 }
 
-function ResultTable({ result, table }: { result: AnalyzeResult; table: AnalysisTable | null }) {
-  // Detail mode: raw filtered rows, one column per object-type property.
+function ResultTable({
+  result,
+  table,
+  orderBy,
+  orderDir,
+  onSort,
+}: {
+  result: AnalyzeResult
+  table: AnalysisTable | null
+  orderBy: string | null
+  orderDir: "asc" | "desc"
+  onSort: (colName: string) => void
+}) {
+  // Detail mode: one server-side page of filtered rows, one column per property.
+  // Pagination lives outside this component (in the table-lens container).
   if (result.mode === "detail") {
     const cols = table?.columns ?? []
+    if (result.rows.length === 0) {
+      return (
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          无匹配数据
+        </div>
+      )
+    }
     return (
       <table className="w-full text-sm">
         <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
           <tr className="border-b border-border">
-            {cols.map((c) => (
-              <th key={c.name} className="px-4 py-2 text-left font-medium">
-                {c.label}
-              </th>
-            ))}
+            {cols.map((c) => {
+              const numeric = isNumericColumn(c)
+              const active = orderBy === c.name
+              // Column-click sort indicator: neutral when inactive, up/down when active.
+              const SortIcon = !active
+                ? ChevronsUpDownIcon
+                : orderDir === "asc"
+                  ? ChevronUpIcon
+                  : ChevronDownIcon
+              return (
+                <th
+                  key={c.name}
+                  className={`px-4 py-2 font-medium ${numeric ? "text-right" : "text-left"}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSort(c.name)}
+                    // Reverse the flex on numeric columns so the icon sits to the
+                    // left of the right-aligned header label.
+                    className={`inline-flex items-center gap-1 hover:text-foreground ${
+                      numeric ? "flex-row-reverse" : ""
+                    } ${active ? "text-foreground" : ""}`}
+                  >
+                    <span>{c.label}</span>
+                    <SortIcon className={`size-3 ${active ? "" : "opacity-40"}`} />
+                  </button>
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>
           {result.rows.map((r, ri) => (
-            <tr key={ri} className="border-b border-border/60 hover:bg-muted/50">
-              {cols.map((c) => (
-                <td key={c.name} className="px-4 py-2">
-                  {formatValue((r[c.name] ?? "") as number | string)}
-                </td>
-              ))}
+            <tr key={ri} className="border-b border-border/60 odd:bg-muted/20 hover:bg-muted/50">
+              {cols.map((c, ci) => {
+                const raw = (r[c.name] ?? "") as number | string
+                const numeric = isNumericColumn(c)
+                return (
+                  <td
+                    key={c.name}
+                    className={`px-4 py-2 ${numeric ? "text-right tabular-nums" : ""} ${
+                      ci === 0 ? "font-mono text-emerald-500" : ""
+                    }`}
+                  >
+                    <span className="inline-block max-w-[240px] truncate align-middle" title={String(raw)}>
+                      {formatValue(raw)}
+                    </span>
+                  </td>
+                )
+              })}
             </tr>
           ))}
         </tbody>
@@ -760,8 +937,8 @@ function ResultTable({ result, table }: { result: AnalyzeResult; table: Analysis
     <table className="w-full text-sm">
       <thead className="text-xs text-muted-foreground">
         <tr className="border-b border-border">
-          {result.columns.map((c) => (
-            <th key={c} className="px-4 py-2 text-left font-medium last:text-right">
+          {result.columns.map((c, i) => (
+            <th key={c} className={`px-4 py-2 font-medium ${i === 0 ? "text-left" : "text-right"}`}>
               {c}
             </th>
           ))}
@@ -769,10 +946,13 @@ function ResultTable({ result, table }: { result: AnalyzeResult; table: Analysis
       </thead>
       <tbody>
         {result.rows.map((r) => (
-          <tr key={r.group as string} className="border-b border-border/60 hover:bg-muted/50">
+          <tr
+            key={r.group as string}
+            className="border-b border-border/60 odd:bg-muted/20 hover:bg-muted/50"
+          >
             <td className="px-4 py-2">{r.group as string}</td>
             {result.columns.slice(1).map((c, i) => (
-              <td key={c} className={`px-4 py-2 ${i === result.columns.length - 2 ? "text-right" : ""}`}>
+              <td key={c} className="px-4 py-2 text-right tabular-nums">
                 {formatValue(r[`m${i}`] as number)}
               </td>
             ))}
@@ -785,13 +965,14 @@ function ResultTable({ result, table }: { result: AnalyzeResult; table: Analysis
 
 // --- Data-driven lenses: all read the same current object set. ---
 
-// Timeline: current object set ordered by its time property.
+// Timeline: a newest-first slice of the object set, fetched server-side ordered
+// by the time property (at most TIMELINE_LIMIT rows).
 function TimelineView({
-  detailRows,
+  rows,
   columns,
   timeCol,
 }: {
-  detailRows: Record<string, unknown>[]
+  rows: Record<string, unknown>[]
   columns: AnalysisColumn[]
   timeCol: AnalysisColumn
 }) {
@@ -804,15 +985,13 @@ function TimelineView({
     )
     .slice(0, 3)
 
-  const items = detailRows
+  const items = rows
     .map((row) => ({
       time: String(row[timeCol.name] ?? ""),
       title: String(row[titleCol?.name ?? ""] ?? ""),
       sub: subCols.map((c) => `${c.label}: ${row[c.name] ?? "—"}`).join(" · "),
     }))
     .filter((it) => it.time !== "")
-    // ISO date/timestamp strings sort correctly as plain strings; newest first.
-    .sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0))
 
   const shown = items.slice(0, 100)
 
@@ -857,25 +1036,21 @@ const GEO_COORDS: Record<string, { x: number; y: number }> = {
   海外: { x: 90, y: 88 },
 }
 
-// Map: current object set grouped by its geo property; click a point to drill in.
+// Map: geo counts computed server-side (count aggregate grouped by the geo
+// property); click a point to drill in.
 function MapView({
-  detailRows,
+  counts,
   geoCol,
   onDrill,
 }: {
-  detailRows: Record<string, unknown>[]
+  counts: { value: string; count: number }[]
   geoCol: AnalysisColumn
   onDrill: (value: string) => void
 }) {
-  const counts = new Map<string, number>()
-  for (const row of detailRows) {
-    const v = String(row[geoCol.name] ?? "").trim()
-    if (v === "") continue
-    counts.set(v, (counts.get(v) ?? 0) + 1)
-  }
   const known: { value: string; count: number; x: number; y: number }[] = []
   const unknown: { value: string; count: number }[] = []
-  for (const [value, count] of Array.from(counts.entries())) {
+  for (const { value, count } of counts) {
+    if (value.trim() === "") continue
     const c = GEO_COORDS[value]
     if (c) known.push({ value, count, x: c.x, y: c.y })
     else unknown.push({ value, count })

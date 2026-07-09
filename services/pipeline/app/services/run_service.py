@@ -155,6 +155,7 @@ def run_pipeline(pipeline_id: str, run_id: str) -> None:
                 try:
                     data_client.register_dataset({
                         "name": out["name"],
+                        "display_name": out.get("display_name"),
                         "connector_id": pipeline_conn,
                         "storage_uri": out["storage_uri"],
                         "layer": "mart",

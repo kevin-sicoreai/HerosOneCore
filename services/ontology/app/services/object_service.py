@@ -15,6 +15,23 @@ def _dataset_uri(object_type: ObjectType) -> str:
     return ds["storage_uri"]
 
 
+def dataset_identifiers(object_type: ObjectType) -> set[str]:
+    """Identifiers a classification may reference for this object's backing dataset.
+
+    Returns the data-service dataset id plus its human name (loose match — either
+    form resolves). Best-effort: masking must never break a read, so a data-service
+    hiccup just yields the id alone.
+    """
+    ids: set[str] = {object_type.dataset_id}
+    try:
+        ds = data_client.get_dataset(object_type.dataset_id)
+        if ds.get("name"):
+            ids.add(ds["name"])
+    except Exception:  # noqa: BLE001 - degrade gracefully; masking stays best-effort
+        pass
+    return ids
+
+
 def list_instances(object_type: ObjectType, limit: int) -> dict[str, Any]:
     result = query.preview(_dataset_uri(object_type), limit)
     return {"object_type_id": object_type.id, **result}

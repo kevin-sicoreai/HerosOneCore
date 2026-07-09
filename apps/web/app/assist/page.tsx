@@ -36,9 +36,10 @@ const TRACE_ICON: Record<TraceIcon, React.ElementType> = {
 }
 
 const SUGGESTIONS = [
-  "采购单 128 是什么情况？关联了谁、数据从哪来",
-  "哪个区域采购额最高？",
-  "各承运商的发运延误率是多少？",
+  "员工 1024 是谁？他的绩效和培训记录怎么样",
+  "哪个部门离职率最高？",
+  "招聘漏斗各阶段有多少人？",
+  "生成本月人力月报",
 ]
 
 type UIMessage = {

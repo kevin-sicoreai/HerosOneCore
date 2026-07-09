@@ -25,6 +25,10 @@ class Table:
     desc: str
     columns: list[Column]
     rows: list[dict] = field(default_factory=list, repr=False)
+    # Total instance count for the table. When set (e.g. from the ontology graph)
+    # the catalog can report row_count without materializing `rows`; None means
+    # "unknown", and callers fall back to len(rows).
+    row_count: int | None = None
 
 
 def _build_devices() -> list[dict]:

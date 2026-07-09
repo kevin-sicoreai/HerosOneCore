@@ -133,7 +133,15 @@ def compile_project(pipeline, steps, edges, source_meta: dict[str, dict]) -> dic
                 + "', format='parquet') }}\n"
                 f"select * from {ref}\n"
             )
-            outputs.append({"step_id": s.id, "name": out_name, "storage_uri": uri, "model": model})
+            # Mart file/model name stays English (out_name); display_name is an
+            # optional Chinese label carried through to the data-service catalog.
+            outputs.append({
+                "step_id": s.id,
+                "name": out_name,
+                "display_name": s.config.get("display_name"),
+                "storage_uri": uri,
+                "model": model,
+            })
         elif s.kind == StepKind.JOIN:
             r0 = _ref_for(ins[0], steps_by_id, source_table)
             r1 = _ref_for(ins[1], steps_by_id, source_table)

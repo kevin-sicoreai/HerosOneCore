@@ -14,11 +14,10 @@ from fastapi import HTTPException, status
 
 from app.clients import ontology_service
 from app.domain.metrics import METRICS, Dimension, Metric
+from app.repositories import object_rows
 from app.schemas.analysis import FilterSpec
 from app.schemas.metrics import MetricGroupRow, MetricQueryResult
 from app.services.analyze import _matches, _to_number
-
-_PREVIEW_ROWS = 1000
 
 
 class _Ontology:
@@ -50,10 +49,9 @@ class _Ontology:
 
 
 def _load_rows(object_type_id: str) -> list[dict]:
-    try:
-        return ontology_service.list_objects(object_type_id, _PREVIEW_ROWS)["rows"]
-    except httpx.HTTPError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "本体服务不可用") from exc
+    # Shared 30s TTL cache with the analyze path; both base and join-far object
+    # sets go through it, so repeated metric queries reuse the fetched rows.
+    return object_rows.get_rows(object_type_id)
 
 
 def _enrich_linked_dimension(
@@ -131,6 +129,14 @@ def query(metric_key: str, dimension_key: str | None, filters: list[FilterSpec],
 
     if dim and dim.via_link:
         _enrich_linked_dimension(rows, base_id, dim, onto)
+
+    # Metric-level fixed filters pin the 口径 (e.g. 在职 only) before any grouping.
+    if metric.base_filters:
+        rows = [
+            r
+            for r in rows
+            if all(str(r.get(prop)) == str(val) for prop, val in metric.base_filters)
+        ]
 
     rows = [r for r in rows if all(_matches(r, f) for f in filters)]
 

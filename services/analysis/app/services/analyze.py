@@ -62,14 +62,33 @@ def run(table: Table, req: AnalyzeRequest) -> AnalyzeResult:
 
     rows = [r for r in table.rows if all(_matches(r, f) for f in req.filters)]
 
-    # Detail mode: no metrics -> return the filtered rows as-is, all columns.
+    # Detail mode: no metrics -> filter, optionally sort, then paginate. The full
+    # filtered count is reported via matched_rows so the UI can size its pager.
     if not req.metrics:
+        matched_rows = len(rows)
+        if req.order_by and req.order_by in columns_by_name:
+            field = req.order_by
+            # Numeric columns sort numerically; otherwise fall back to a stable
+            # string key. None sinks to one end. `_to_number` mirrors the
+            # aggregation engine's numeric detection.
+            def sort_key(r: dict) -> tuple:
+                value = r.get(field)
+                number = _to_number(value)
+                if number is not None:
+                    return (0, number, "")
+                return (1, 0.0, str(value) if value is not None else "")
+
+            rows = sorted(rows, key=sort_key, reverse=req.order_dir == "desc")
+        start = (req.page - 1) * req.page_size
+        page_rows = rows[start : start + req.page_size]
         return AnalyzeResult(
             mode="detail",
             columns=[c.label for c in table.columns],
-            rows=rows,
+            rows=page_rows,
             totals=[],
-            matched_rows=len(rows),
+            matched_rows=matched_rows,
+            page=req.page,
+            page_size=req.page_size,
         )
 
     def metric_label(m: MetricSpec) -> str:

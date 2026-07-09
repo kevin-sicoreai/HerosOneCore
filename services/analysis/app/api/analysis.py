@@ -14,7 +14,7 @@ def _table_out(t) -> TableOut:
         name=t.name,
         label=t.label,
         desc=t.desc,
-        row_count=len(t.rows),
+        row_count=t.row_count if t.row_count is not None else len(t.rows),
         columns=[
             ColumnOut(name=c.name, label=c.label, kind=c.kind, data_type=c.data_type)
             for c in t.columns

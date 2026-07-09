@@ -31,6 +31,7 @@ export type ConnectorType = {
 export type Dataset = {
   id: string
   name: string
+  display_name: string | null
   connector_id: string
   layer: string
   storage_uri: string

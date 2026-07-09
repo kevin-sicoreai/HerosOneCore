@@ -1,5 +1,7 @@
 """Governance response models."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -46,6 +48,26 @@ class RoleOut(BaseModel):
     can_read: bool
     can_write: bool
     can_admin: bool
+
+
+class ClassificationIn(BaseModel):
+    """Register (upsert) a sensitive-column classification."""
+
+    dataset_name: str  # dataset identifier (data-service dataset id or table name)
+    column_name: str
+    level: str
+    note: str | None = None
+
+
+class ClassificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    dataset_name: str
+    column_name: str
+    level: str
+    note: str | None
+    created_at: datetime
 
 
 class Stats(BaseModel):

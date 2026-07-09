@@ -15,8 +15,11 @@ from app.clients import analysis_service, governance_service, ontology_service
 
 _UNAVAILABLE = json.dumps({"error": "本体服务不可用，无法查询对象类型"}, ensure_ascii=False)
 
-# Cap how many instances a single search pulls (the ontology API caps at 1000).
+# Cap how many instances a single search pulls (keyword search stays small).
 _SEARCH_LIMIT = 200
+# Primary-key lookups must scan the full object set (employee has 20k rows;
+# the ontology preview cap is raised via PREVIEW_MAX_LIMIT).
+_LOOKUP_LIMIT = 50000
 
 
 @tool
@@ -125,7 +128,7 @@ def get_object(object_type: str, object_id: str) -> str:
         if found is None:
             return json.dumps({"error": f"对象类型 '{object_type}' 不存在"}, ensure_ascii=False)
         pk_col = _primary_key(found)
-        data = ontology_service.list_objects(found["id"], 1000)
+        data = ontology_service.list_objects(found["id"], _LOOKUP_LIMIT)
     except httpx.HTTPError:
         return _UNAVAILABLE
     row = next(

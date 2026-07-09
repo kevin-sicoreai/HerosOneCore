@@ -411,10 +411,15 @@ function DatasetsTab({ connMap }: { connMap: Record<string, string> }) {
               return (
                 <tr
                   key={d.id}
-                  onClick={() => open({ name: d.name, kind: "数据集" })}
+                  onClick={() => open({ name: d.display_name ?? d.name, kind: "数据集" })}
                   className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/50"
                 >
-                  <td className="px-4 py-2 font-medium">{d.name}</td>
+                  <td className="px-4 py-2 font-medium">
+                    {d.display_name ?? d.name}
+                    {d.display_name && (
+                      <span className="ml-2 text-xs text-muted-foreground font-mono">{d.name}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2">
                     <Badge variant={l.variant}>{l.label}</Badge>
                   </td>

@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ColumnOut(BaseModel):
@@ -38,6 +38,11 @@ class AnalyzeRequest(BaseModel):
     metrics: list[MetricSpec] = []
     filters: list[FilterSpec] = []
     limit: int = 50
+    # Detail-mode pagination + sorting. Ignored in aggregate mode.
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=100, ge=1, le=1000)
+    order_by: str | None = None
+    order_dir: Literal["asc", "desc"] = "desc"
 
 
 class AnalyzeResult(BaseModel):
@@ -50,3 +55,6 @@ class AnalyzeResult(BaseModel):
     # Ungrouped totals per metric (empty in detail mode).
     totals: list[float]
     matched_rows: int
+    # Detail-mode pagination echo; page_size = 0 signals "not applicable" (aggregate mode).
+    page: int = 1
+    page_size: int = 0

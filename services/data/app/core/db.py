@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -37,3 +37,19 @@ def init_db() -> None:
     from app.repositories import models  # noqa: F401
 
     Base.metadata.create_all(engine)
+    _apply_lightweight_migrations()
+
+
+def _apply_lightweight_migrations() -> None:
+    """Idempotent, minimal in-place schema fixes.
+
+    create_all() only creates missing tables; it never adds columns to tables
+    that already exist. Until Alembic is wired up, this backfills newly added
+    columns on pre-existing databases. Currently: datasets.display_name.
+    """
+    if not _is_sqlite:
+        return
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(datasets)"))}
+        if cols and "display_name" not in cols:
+            conn.execute(text("ALTER TABLE datasets ADD COLUMN display_name VARCHAR(255)"))

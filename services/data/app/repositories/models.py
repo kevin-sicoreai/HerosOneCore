@@ -47,7 +47,10 @@ class Dataset(Base):
     __tablename__ = "datasets"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    # English identifier (raw table name / mart English name).
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional human-facing display name (Chinese); falls back to `name` when unset.
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     connector_id: Mapped[str] = mapped_column(
         ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False
     )

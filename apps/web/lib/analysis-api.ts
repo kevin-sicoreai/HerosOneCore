@@ -39,6 +39,11 @@ export type AnalyzeRequest = {
   group_by: string | null
   metrics: MetricSpec[]
   filters: FilterSpec[]
+  // Detail-mode pagination + sorting; ignored by the service in aggregate mode.
+  page?: number
+  page_size?: number
+  order_by?: string | null
+  order_dir?: "asc" | "desc"
 }
 
 export type AnalyzeResult = {
@@ -48,6 +53,9 @@ export type AnalyzeResult = {
   rows: Array<Record<string, number | string | null>>
   totals: number[]
   matched_rows: number
+  // Detail-mode pagination echo; page_size 0 = aggregate mode (not applicable).
+  page: number
+  page_size: number
 }
 
 // --- Metric (cube) layer: named business measures, cross-object joins ---

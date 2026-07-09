@@ -18,6 +18,7 @@ import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Pagination } from "@/components/ui/pagination"
 
 // Ontology node color -> Tailwind border/text classes (same map as the ontology page).
 const COLOR: Record<string, string> = {
@@ -169,6 +170,9 @@ export default function ExplorerPage() {
 // How many instance rows to load for browsing + faceting. Higher than the old
 // cap so facet value distributions are representative.
 const INSTANCE_LIMIT = 500
+// Client-side page size for the instance table. The 500-row sample is fetched
+// once; only one page of rows is rendered at a time to keep the DOM light.
+const INSTANCE_PAGE_SIZE = 50
 // A property qualifies as a facet only when its distinct value count sits in this
 // window — enough variety to filter by, but not a high-cardinality/unique column.
 const FACET_MIN_DISTINCT = 2
@@ -202,6 +206,8 @@ function InstanceList({
   const [selected, setSelected] = React.useState<Record<string, Set<string>>>({})
   // Facets showing all their values rather than the top FACET_VALUES_SHOWN.
   const [expandedFacets, setExpandedFacets] = React.useState<Record<string, boolean>>({})
+  // Current client-side page of the filtered rows.
+  const [page, setPage] = React.useState(1)
 
   React.useEffect(() => {
     let cancelled = false
@@ -210,6 +216,7 @@ function InstanceList({
     setQ("")
     setSelected({})
     setExpandedFacets({})
+    setPage(1)
     ;(async () => {
       try {
         const col = await pkColOf(focus.id)
@@ -279,6 +286,14 @@ function InstanceList({
     return true
   })
 
+  // Search / facet changes narrow the result set — jump back to the first page.
+  React.useEffect(() => {
+    setPage(1)
+  }, [q, selected])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / INSTANCE_PAGE_SIZE))
+  const paged = filtered.slice((page - 1) * INSTANCE_PAGE_SIZE, page * INSTANCE_PAGE_SIZE)
+
   function toggleFacet(col: string, value: string) {
     setSelected((prev) => {
       const next = { ...prev }
@@ -321,7 +336,7 @@ function InstanceList({
       </div>
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Table */}
-        <div className="order-2 min-h-0 flex-1 overflow-auto lg:order-1">
+        <div className="order-2 flex min-h-0 flex-1 flex-col lg:order-1">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2Icon className="size-4 animate-spin" /> 加载实例…
@@ -330,43 +345,55 @@ function InstanceList({
             <div className="py-10 text-center text-sm text-red-500">{error}</div>
           ) : (
             <>
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
-                  <tr className="border-b border-border">
-                    {columns.map((c) => (
-                      <th key={c} className="px-3 py-2 text-left font-medium">
-                        {fieldLabel(c)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r, i) => (
-                    <tr
-                      key={i}
-                      onClick={() =>
-                        onPick({
-                          otId: focus.id,
-                          pk: String(r[pkCol]),
-                          label: labelOf(r),
-                          typeName: focus.display_name,
-                          color: focus.color,
-                          row: r,
-                        })
-                      }
-                      className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
-                    >
-                      {columns.map((c, j) => (
-                        <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
-                          {String(r[c] ?? "")}
-                        </td>
+              <div className="min-h-0 flex-1 overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
+                    <tr className="border-b border-border">
+                      {columns.map((c) => (
+                        <th key={c} className="px-3 py-2 text-left font-medium">
+                          {fieldLabel(c)}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filtered.length === 0 && (
-                <div className="p-6 text-center text-sm text-muted-foreground">无匹配对象</div>
+                  </thead>
+                  <tbody>
+                    {paged.map((r, i) => (
+                      <tr
+                        key={i}
+                        onClick={() =>
+                          onPick({
+                            otId: focus.id,
+                            pk: String(r[pkCol]),
+                            label: labelOf(r),
+                            typeName: focus.display_name,
+                            color: focus.color,
+                            row: r,
+                          })
+                        }
+                        className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
+                      >
+                        {columns.map((c, j) => (
+                          <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
+                            {String(r[c] ?? "")}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filtered.length === 0 && (
+                  <div className="p-6 text-center text-sm text-muted-foreground">无匹配对象</div>
+                )}
+              </div>
+              {filtered.length > 0 && (
+                <Pagination
+                  page={page}
+                  pageSize={INSTANCE_PAGE_SIZE}
+                  total={filtered.length}
+                  pages={pageCount}
+                  onPageChange={setPage}
+                  className="shrink-0 border-t border-border"
+                />
               )}
             </>
           )}

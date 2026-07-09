@@ -7,6 +7,7 @@ business-facing semantic layer — not raw datasets. MockProvider (the built-in
 devices/orders tables) remains for offline use.
 """
 
+import time
 from typing import Protocol
 
 import httpx
@@ -14,10 +15,7 @@ from fastapi import HTTPException, status
 
 from app.clients import ontology_service
 from app.domain.tables import TABLES, Column, Table
-
-# The ontology objects endpoint caps previews at 1000 rows (preview_max_limit);
-# request that much so the workbench sees as much of each object type as it serves.
-_PREVIEW_ROWS = 1000
+from app.repositories import object_rows
 
 _NUMERIC_TYPES = {
     "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
@@ -37,6 +35,22 @@ _FIELD_LABELS = {
     "city": "城市", "capacity": "容量", "order_date": "下单日期",
     "total_amount": "总金额", "po_id": "采购单 ID", "ship_date": "发运日期",
     "eta": "预计到达", "carrier": "承运商",
+    # HR scenario fields.
+    "monthly_salary": "月薪", "headcount_plan": "编制人数", "hire_date": "入职日期",
+    "term_date": "离职日期", "department_id": "部门 ID", "position_id": "职位 ID",
+    "title": "职位名称", "level": "职级", "gender": "性别", "age": "年龄",
+    "work_date": "日期", "hours": "工时", "base_salary": "基本工资",
+    "bonus": "奖金", "total": "合计", "month": "月份", "stage": "阶段",
+    "candidate_name": "候选人", "applied_at": "投递日期", "source": "渠道",
+    # HR ontology fields (performance / recruiting / training / HR events).
+    "cycle": "考核周期", "score": "绩效得分", "reviewer_id": "考核人",
+    "department_name": "部门名称", "training_id": "课程 ID", "completed_at": "完成时间",
+    "result": "结果", "promote_date": "晋升日期", "from_level": "原职级",
+    "to_level": "新职级", "transfer_date": "调动日期", "from_department_id": "原部门",
+    "to_department_id": "新部门", "reason": "原因", "leave_type": "请假类型",
+    "start_date": "开始日期", "end_date": "结束日期", "days": "天数",
+    "round": "轮次", "interviewer_id": "面试官", "interview_date": "面试日期",
+    "application_id": "投递 ID", "contract_type": "合同类型", "sign_date": "签订日期",
 }
 
 
@@ -51,9 +65,11 @@ def _column_kind(name: str, data_type: str, is_primary_key: bool) -> str:
     return "measure" if base in _NUMERIC_TYPES else "dimension"
 
 
-def _to_table(summary: dict) -> Table:
-    detail = ontology_service.get_object_type(summary["id"])
-    columns = [
+def _columns_for(object_type_id: str) -> list[Column]:
+    """Columns for an object type, read from its (cached) detail. Shared by the
+    catalog and by get_table so both hit the same short-TTL cache."""
+    detail = object_rows.get_object_type(object_type_id)
+    return [
         Column(
             p["name"],
             _field_label(p["name"]),
@@ -62,10 +78,6 @@ def _to_table(summary: dict) -> Table:
         )
         for p in detail.get("properties", [])
     ]
-    rows = ontology_service.list_objects(summary["id"], _PREVIEW_ROWS)["rows"]
-    label = summary["display_name"]
-    desc = summary.get("description") or f"本体对象类型「{label}」"
-    return Table(name=summary["api_name"], label=label, desc=desc, columns=columns, rows=rows)
 
 
 class DataProvider(Protocol):
@@ -85,13 +97,41 @@ class MockProvider:
         return table
 
 
+# Process-wide TTL cache for the table catalog. Building it fans out to the
+# ontology (one graph call + one detail per type); a short TTL keeps repeated
+# page loads cheap while still reflecting ontology edits within ~30s.
+_CATALOG_TTL_SECONDS = 30.0
+_catalog_cache: tuple[float, list[Table]] | None = None
+
+
 class OntologyProvider:
     def list_tables(self) -> list[Table]:
+        global _catalog_cache
+        now = time.monotonic()
+        if _catalog_cache is not None and now < _catalog_cache[0]:
+            return _catalog_cache[1]
         try:
-            summaries = ontology_service.list_object_types()
+            # One graph call carries display_name / property_count /
+            # instance_count for every type — no instance rows are pulled here.
+            graph = ontology_service.graph()
         except httpx.HTTPError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "本体服务不可用") from exc
-        return [_to_table(s) for s in summaries]
+        tables = []
+        for node in graph.get("nodes", []):
+            label = node["display_name"]
+            # The graph has no description; keep the existing fallback wording.
+            tables.append(
+                Table(
+                    name=node["api_name"],
+                    label=label,
+                    desc=f"本体对象类型「{label}」",
+                    columns=_columns_for(node["id"]),
+                    rows=[],
+                    row_count=node.get("instance_count"),
+                )
+            )
+        _catalog_cache = (now + _CATALOG_TTL_SECONDS, tables)
+        return tables
 
     def get_table(self, name: str) -> Table:
         try:
@@ -100,7 +140,17 @@ class OntologyProvider:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "本体服务不可用") from exc
         for s in summaries:
             if name in (s["api_name"], s["display_name"], s["id"]):
-                return _to_table(s)
+                label = s["display_name"]
+                desc = s.get("description") or f"本体对象类型「{label}」"
+                rows = object_rows.get_rows(s["id"])
+                return Table(
+                    name=s["api_name"],
+                    label=label,
+                    desc=desc,
+                    columns=_columns_for(s["id"]),
+                    rows=rows,
+                    row_count=len(rows),
+                )
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"对象类型 '{name}' 不存在")
 
 

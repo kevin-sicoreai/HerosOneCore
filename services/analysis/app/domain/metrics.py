@@ -45,97 +45,122 @@ class Metric:
     key: str
     label: str
     description: str
-    base_type: str  # object type api_name, e.g. "PurchaseOrder"
+    base_type: str  # object type api_name, e.g. "employee"
     agg: str  # sum | avg | min | max | count | rate
     measure: str | None = None  # numeric base property for sum/avg/min/max
     unit: str = ""  # display unit, e.g. "¥", "单", "%"
     numerator: tuple[str, str] | None = None  # (property, value) for rate; equality match
     dimensions: list[Dimension] = field(default_factory=list)
+    # Metric-level fixed filters applied to the base rows before grouping and
+    # aggregation: each (property, value) keeps only rows where the property
+    # equals value (string comparison). Used to pin a metric's 口径, e.g. only
+    # 在职 employees for headcount/salary. Empty = no restriction.
+    base_filters: list[tuple[str, str]] = field(default_factory=list)
 
 
-# Registry keyed by metric.key. Covers the supply-chain demo (场景 8.1); the
-# flagship is purchase_total sliced by supplier_region — a cross-object join
-# (PurchaseOrder → 供货方 → Supplier.region) the raw /analyze cannot express.
-_SUPPLIER_REGION = Dimension("supplier_region", "供应商区域", "region", via_link="供货方")
-_WAREHOUSE_CITY = Dimension("warehouse_city", "目的仓库城市", "city", via_link="目的仓库")
+# Registry keyed by metric.key. Covers the HR-only scenario (场景 8.2). Cross-object
+# slices use the link-join mechanism: employee → 所属部门 → department.name for the
+# department slice, employee → 担任职位 → position.level for the job-grade slice.
+_EMP_DEPT_NAME = Dimension("dept_name", "所属部门", "name", via_link="所属部门")
+_EMP_POSITION_LEVEL = Dimension("position_level", "职级", "level", via_link="担任职位")
+_EMP_CITY = Dimension("city", "城市", "city")
 
 METRICS: dict[str, Metric] = {
     m.key: m
     for m in [
+        # --- HR 人力场景（场景 8.2）---
         Metric(
-            key="purchase_total",
-            label="采购总额",
-            description="按供应商区域/采购状态汇总的采购单总金额",
-            base_type="PurchaseOrder",
-            agg="sum",
-            measure="total_amount",
+            key="hr_headcount",
+            label="在编人数",
+            description="状态为「在职」的员工人数（在编口径）",
+            base_type="employee",
+            agg="count",
+            unit="人",
+            base_filters=[("status", "在职")],
+            dimensions=[
+                _EMP_DEPT_NAME,
+                _EMP_CITY,
+                _EMP_POSITION_LEVEL,
+            ],
+        ),
+        Metric(
+            key="hr_attrition_rate",
+            label="离职率",
+            description="状态为「离职」的员工占全体员工的比例",
+            base_type="employee",
+            agg="rate",
+            unit="%",
+            numerator=("status", "离职"),
+            dimensions=[
+                _EMP_DEPT_NAME,
+                _EMP_CITY,
+            ],
+        ),
+        Metric(
+            key="hr_avg_salary",
+            label="人均月薪",
+            description="在职员工月薪均值（口径：仅统计在职员工的 monthly_salary）",
+            base_type="employee",
+            agg="avg",
+            measure="monthly_salary",
             unit="¥",
+            base_filters=[("status", "在职")],
             dimensions=[
-                _SUPPLIER_REGION,
-                Dimension("po_status", "采购状态", "status"),
+                _EMP_DEPT_NAME,
+                _EMP_CITY,
+                _EMP_POSITION_LEVEL,
             ],
         ),
         Metric(
-            key="purchase_count",
-            label="采购单数",
-            description="按供应商区域/采购状态统计的采购单数量",
-            base_type="PurchaseOrder",
+            key="hr_headcount_plan",
+            label="编制人数",
+            description="按部门/城市汇总的编制计划人数（headcount_plan）",
+            base_type="department",
+            agg="sum",
+            measure="headcount_plan",
+            unit="人",
+            dimensions=[
+                Dimension("city", "城市", "city"),
+                Dimension("dept_name", "部门", "name"),
+            ],
+        ),
+        Metric(
+            key="hr_perf_score",
+            label="平均绩效分",
+            description=(
+                "绩效考核平均得分（口径：score 0-100，评级分段 "
+                "S≥90 / A 80-89 / B 70-79 / C 60-69 / D<60）"
+            ),
+            base_type="performance_review",
+            agg="avg",
+            measure="score",
+            unit="分",
+            dimensions=[
+                Dimension("cycle", "考核周期", "cycle"),
+                Dimension("department_name", "部门", "department_name"),
+            ],
+        ),
+        Metric(
+            key="hr_application_count",
+            label="招聘投递数",
+            description="按阶段/渠道统计的招聘投递数量（按阶段看即招聘漏斗）",
+            base_type="application",
             agg="count",
-            unit="单",
+            unit="份",
             dimensions=[
-                _SUPPLIER_REGION,
-                Dimension("po_status", "采购状态", "status"),
+                Dimension("stage", "阶段", "stage"),
+                Dimension("source", "渠道", "source"),
             ],
         ),
         Metric(
-            key="shipment_count",
-            label="发运量",
-            description="按承运商/发运状态/目的仓库城市统计的发运单数量",
-            base_type="Shipment",
+            key="hr_training_count",
+            label="培训人次",
+            description="按结果（通过/未通过）统计的培训记录数",
+            base_type="training_record",
             agg="count",
-            unit="单",
+            unit="人次",
             dimensions=[
-                Dimension("carrier", "承运商", "carrier"),
-                Dimension("shipment_status", "发运状态", "status"),
-                _WAREHOUSE_CITY,
-            ],
-        ),
-        Metric(
-            key="shipment_delay_rate",
-            label="发运延误率",
-            description="状态为「延误」的发运单占比",
-            base_type="Shipment",
-            agg="rate",
-            unit="%",
-            numerator=("status", "延误"),
-            dimensions=[
-                Dimension("carrier", "承运商", "carrier"),
-                _WAREHOUSE_CITY,
-            ],
-        ),
-        Metric(
-            key="shipment_fulfilled_rate",
-            label="发运履约率",
-            description="状态为「已交付」的发运单占比",
-            base_type="Shipment",
-            agg="rate",
-            unit="%",
-            numerator=("status", "已交付"),
-            dimensions=[
-                Dimension("carrier", "承运商", "carrier"),
-                _WAREHOUSE_CITY,
-            ],
-        ),
-        Metric(
-            key="product_count",
-            label="产品数",
-            description="按类别/供应商区域统计的产品数量",
-            base_type="Product",
-            agg="count",
-            unit="个",
-            dimensions=[
-                Dimension("category", "类别", "category"),
-                _SUPPLIER_REGION,
+                Dimension("result", "结果", "result"),
             ],
         ),
     ]
