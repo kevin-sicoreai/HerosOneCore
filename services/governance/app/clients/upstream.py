@@ -24,17 +24,37 @@ def _get(base: str, path: str) -> Any:
         return None
 
 
-# --- data service ---
+def _get_all(base: str, path: str) -> list[dict]:
+    """Fetch every page of a `Page`-enveloped list endpoint (best-effort).
+
+    Falls back to treating the response as a plain list for non-paginated
+    endpoints, so callers always get a flat list to iterate.
+    """
+    sep = "&" if "?" in path else "?"
+    items: list[dict] = []
+    page = 1
+    while True:
+        data = _get(base, f"{path}{sep}page={page}&page_size=100")
+        if not isinstance(data, dict):
+            return data or []
+        items.extend(data.get("items") or [])
+        if page >= (data.get("pages") or 1):
+            break
+        page += 1
+    return items
+
+
+# --- data service (paginated: unwrap the Page envelope) ---
 def list_datasets() -> list[dict]:
-    return _get(settings.data_api_url, "/datasets") or []
+    return _get_all(settings.data_api_url, "/datasets")
 
 
 def list_connectors() -> list[dict]:
-    return _get(settings.data_api_url, "/connectors") or []
+    return _get_all(settings.data_api_url, "/connectors")
 
 
 def list_syncs(connector_id: str) -> list[dict]:
-    return _get(settings.data_api_url, f"/connectors/{connector_id}/syncs") or []
+    return _get_all(settings.data_api_url, f"/connectors/{connector_id}/syncs")
 
 
 # --- pipeline service ---

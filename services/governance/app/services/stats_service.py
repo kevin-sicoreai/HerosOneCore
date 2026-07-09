@@ -16,6 +16,6 @@ def build(db: Session) -> Stats:
     return Stats(
         governed_assets=governed,
         roles=len(roles_service.list_all(db)),
-        audit_events=len(audit_service.build(limit=1000)),
+        audit_events=len(audit_service.build(db, limit=1000)),
         encryption_coverage="100%",
     )

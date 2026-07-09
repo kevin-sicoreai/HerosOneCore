@@ -17,19 +17,6 @@ export type Resource = {
   children?: Resource[]
 }
 
-export type Workspace = {
-  id: string
-  name: string
-  kind: "foundry" | "gotham"
-  desc: string
-}
-
-export const WORKSPACES: Workspace[] = [
-  { id: "ws-ops", name: "供应链运营", kind: "foundry", desc: "企业分析工作区" },
-  { id: "ws-case", name: "反欺诈调查", kind: "gotham", desc: "调查分析工作区" },
-  { id: "ws-energy", name: "能源资产管理", kind: "foundry", desc: "企业分析工作区" },
-]
-
 export const RESOURCE_TREE: Resource[] = [
   {
     id: "f-src",

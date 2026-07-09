@@ -1,22 +1,37 @@
 "use client"
 
 import * as React from "react"
+import {
+  Handle,
+  Position,
+  useEdgesState,
+  useNodesState,
+  type Edge,
+  type Node,
+  type NodeProps,
+  type NodeTypes,
+  type OnBeforeDelete,
+  type OnConnect,
+  type OnNodeDrag,
+} from "@xyflow/react"
 import { KeyIcon, PlusIcon, RefreshCwIcon, Share2Icon, TableIcon, Trash2Icon } from "lucide-react"
 
 import { dataApi, type Dataset } from "@/lib/data-api"
 import {
   ontologyApi,
+  type GraphLink,
   type GraphNode,
   type ObjectList,
   type ObjectTypeDetail,
   type OntologyGraph,
 } from "@/lib/ontology-api"
+import { FlowCanvas } from "@/components/flow/flow-canvas"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
-const NODE_W = 160
-const NODE_H = 64
+const NODE_W = 144
+const NODE_H = 54
 const COLORS = ["emerald", "sky", "violet", "amber", "rose"]
 const CARDINALITIES = ["many_to_one", "one_to_many", "one_to_one", "many_to_many"]
 
@@ -28,17 +43,55 @@ const COLOR: Record<string, string> = {
   rose: "border-rose-500/60 text-rose-500",
 }
 
-const inputCls = "w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+const inputCls = "w-full rounded-md border border-border bg-background px-2 py-0.5 text-xs"
 
 type Panel = "detail" | "create" | "link"
 
+// --- domain <-> React Flow conversions ---------------------------------------
+const objToNode = (n: GraphNode): Node => ({
+  id: n.id,
+  type: "objectType",
+  position: { x: n.x, y: n.y },
+  data: { ...n } as unknown as Record<string, unknown>,
+})
+const linkToEdge = (l: GraphLink): Edge => ({
+  id: l.id,
+  source: l.from_object_type_id,
+  target: l.to_object_type_id,
+  label: l.display_name,
+})
+
+// --- custom node -------------------------------------------------------------
+function ObjectTypeNode({ data, selected }: NodeProps) {
+  const d = data as unknown as GraphNode
+  return (
+    <div
+      className={`flex flex-col justify-center rounded-lg border-2 bg-card px-3 text-left shadow-sm ${
+        COLOR[d.color] ?? COLOR.emerald
+      } ${selected ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""}`}
+      style={{ width: NODE_W, height: NODE_H }}
+    >
+      <Handle type="target" position={Position.Left} className="!size-2 !border-2 !border-border !bg-background" />
+      <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
+        <Share2Icon className="size-3 shrink-0" />
+        <span className="truncate">{d.display_name}</span>
+      </div>
+      <div className="truncate text-[10px] text-muted-foreground">
+        {d.property_count} 属性 · {d.instance_count ?? "—"} 实例
+      </div>
+      <Handle type="source" position={Position.Right} className="!size-2 !border-2 !border-border !bg-background" />
+    </div>
+  )
+}
+
 export default function OntologyPage() {
   const [graph, setGraph] = React.useState<OntologyGraph>({ nodes: [], links: [] })
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [datasets, setDatasets] = React.useState<Dataset[]>([])
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const [detail, setDetail] = React.useState<ObjectTypeDetail | null>(null)
   const [panel, setPanel] = React.useState<Panel>("detail")
-  const [connectFrom, setConnectFrom] = React.useState<string | null>(null)
   const [instances, setInstances] = React.useState<ObjectList | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -49,7 +102,7 @@ export default function OntologyPage() {
   const [linkDetails, setLinkDetails] = React.useState<{ from: ObjectTypeDetail; to: ObjectTypeDetail } | null>(null)
   const [lf, setLf] = React.useState({ display_name: "", from_property: "", to_property: "", cardinality: "many_to_one" })
 
-  const drag = React.useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null)
+  const nodeTypes = React.useMemo<NodeTypes>(() => ({ objectType: ObjectTypeNode }), [])
 
   const loadGraph = React.useCallback(async () => {
     const g = await ontologyApi.graph()
@@ -60,8 +113,8 @@ export default function OntologyPage() {
   React.useEffect(() => {
     ;(async () => {
       try {
-        const [g, ds] = await Promise.all([loadGraph(), dataApi.datasets()])
-        setDatasets(ds)
+        const [g, ds] = await Promise.all([loadGraph(), dataApi.datasets({ pageSize: 100 })])
+        setDatasets(ds.items)
         if (g.nodes[0]) setSelectedId(g.nodes[0].id)
       } catch (e) {
         setError(e instanceof Error ? e.message : "加载失败")
@@ -69,10 +122,19 @@ export default function OntologyPage() {
     })()
   }, [loadGraph])
 
+  // derive React Flow state from the server graph (positions come from the server)
+  React.useEffect(() => {
+    setNodes(graph.nodes.map(objToNode))
+    setEdges(graph.links.map(linkToEdge))
+  }, [graph, setNodes, setEdges])
+
   // load selected object type detail + reset instance preview
   React.useEffect(() => {
     setInstances(null)
-    if (!selectedId) { setDetail(null); return }
+    if (!selectedId) {
+      setDetail(null)
+      return
+    }
     ontologyApi.objectType(selectedId).then(setDetail).catch(() => setDetail(null))
   }, [selectedId])
 
@@ -94,42 +156,36 @@ export default function OntologyPage() {
     })()
   }, [pendingLink])
 
-  const nodeById = (id: string) => graph.nodes.find((n) => n.id === id)
-  const selectedNode = selectedId ? nodeById(selectedId) : null
+  const selectedNode = selectedId ? graph.nodes.find((n) => n.id === selectedId) : null
 
   // --- canvas interactions ---------------------------------------------------
-  function onNodeClick(id: string) {
-    if (connectFrom && connectFrom !== id) {
-      setPendingLink({ from: connectFrom, to: id })
+  const onNodeClick = React.useCallback((_e: React.MouseEvent, node: Node) => {
+    setSelectedId(node.id)
+    setPanel("detail")
+  }, [])
+
+  const onConnect = React.useCallback<OnConnect>((conn) => {
+    if (conn.source && conn.target && conn.source !== conn.target) {
+      setPendingLink({ from: conn.source, to: conn.target })
       setPanel("link")
-      setConnectFrom(null)
-    } else {
-      setSelectedId(id)
-      setPanel("detail")
     }
-  }
-  function onPointerDown(e: React.PointerEvent, n: GraphNode) {
-    ;(e.target as Element).setPointerCapture(e.pointerId)
-    drag.current = { id: n.id, sx: e.clientX, sy: e.clientY, ox: n.x, oy: n.y, moved: false }
-  }
-  function onPointerMove(e: React.PointerEvent) {
-    const d = drag.current
-    if (!d) return
-    const dx = e.clientX - d.sx, dy = e.clientY - d.sy
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) d.moved = true
-    setGraph((g) => ({
-      ...g,
-      nodes: g.nodes.map((n) => (n.id === d.id ? { ...n, x: Math.max(0, d.ox + dx), y: Math.max(0, d.oy + dy) } : n)),
-    }))
-  }
-  function onPointerUp(n: GraphNode) {
-    const d = drag.current
-    drag.current = null
-    if (!d) return
-    if (!d.moved) { onNodeClick(n.id); return }
-    const moved = nodeById(n.id)
-    if (moved) ontologyApi.updateObjectType(n.id, { x: moved.x, y: moved.y }).catch(() => {})
-  }
+  }, [])
+
+  const onNodeDragStop = React.useCallback<OnNodeDrag>((_e, node) => {
+    ontologyApi
+      .updateObjectType(node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) })
+      .catch(() => {})
+  }, [])
+
+  // block object-type deletion via keyboard (destructive/server-side); allow link deletion
+  const onBeforeDelete = React.useCallback<OnBeforeDelete>(async ({ edges: es }) => ({ nodes: [], edges: es }), [])
+
+  const onEdgesDelete = React.useCallback(
+    (es: Edge[]) => {
+      Promise.all(es.map((e) => ontologyApi.deleteLink(e.id).catch(() => {}))).then(() => loadGraph())
+    },
+    [loadGraph],
+  )
 
   // --- actions ---------------------------------------------------------------
   function startCreate() {
@@ -143,8 +199,8 @@ export default function OntologyPage() {
       const created = await ontologyApi.createObjectType({
         ...cf,
         color: COLORS[n % COLORS.length],
-        x: 60 + (n % 4) * 180,
-        y: 60 + Math.floor(n / 4) * 120,
+        x: 80 + (n % 4) * 200,
+        y: 80 + Math.floor(n / 4) * 140,
       })
       await loadGraph()
       setSelectedId(created.id)
@@ -175,12 +231,10 @@ export default function OntologyPage() {
   }
   async function deleteSelected() {
     if (!selectedId) return
+    const name = selectedNode?.display_name ?? ""
+    if (!window.confirm(`确认删除对象类型「${name}」？关联的关系也会一并移除。`)) return
     await ontologyApi.deleteObjectType(selectedId).catch(() => {})
     setSelectedId(null)
-    await loadGraph()
-  }
-  async function deleteLink(id: string) {
-    await ontologyApi.deleteLink(id).catch(() => {})
     await loadGraph()
   }
   async function showInstances() {
@@ -189,7 +243,7 @@ export default function OntologyPage() {
   }
 
   return (
-    <PageContainer className="h-full">
+    <PageContainer>
       <PageHeading
         title="本体管理器"
         desc="定义对象类型、关系与属性 —— 平台的语义核心"
@@ -205,96 +259,53 @@ export default function OntologyPage() {
       {error && (
         <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>
       )}
-      {connectFrom && <Badge variant="info" className="w-fit">连线中：点击目标对象类型（点空白取消）</Badge>}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        {/* Canvas */}
-        <div
-          className="relative min-h-[440px] min-w-0 overflow-auto rounded-xl border border-border bg-[radial-gradient(circle,var(--color-border)_1px,transparent_1px)] [background-size:20px_20px]"
-          onPointerMove={onPointerMove}
-          onClick={() => setConnectFrom(null)}
-        >
-          <div className="relative" style={{ width: 1000, height: 560 }}>
-            <svg className="absolute inset-0 h-full w-full" style={{ pointerEvents: "none" }}>
-              {graph.links.map((l) => {
-                const a = nodeById(l.from_object_type_id), b = nodeById(l.to_object_type_id)
-                if (!a || !b) return null
-                const x1 = a.x + NODE_W / 2, y1 = a.y + NODE_H / 2
-                const x2 = b.x + NODE_W / 2, y2 = b.y + NODE_H / 2
-                return (
-                  <g key={l.id} style={{ pointerEvents: "stroke", cursor: "pointer" }} onClick={() => deleteLink(l.id)}>
-                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={12} />
-                    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--color-muted-foreground)" strokeWidth={1.5} strokeOpacity={0.5} />
-                    <rect x={(x1 + x2) / 2 - 30} y={(y1 + y2) / 2 - 9} width={60} height={18} rx={4} fill="var(--color-card)" stroke="var(--color-border)" />
-                    <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground)">
-                      {l.display_name.length > 8 ? l.display_name.slice(0, 7) + "…" : l.display_name}
-                    </text>
-                  </g>
-                )
-              })}
-            </svg>
+      <div className="flex">
+        <Badge variant="outline" className="ml-auto">拖对象右侧手柄到另一对象建关系 · 选中关系按 Delete 删除 · 滚轮缩放</Badge>
+      </div>
 
-            {graph.nodes.map((n) => (
-              <div
-                key={n.id}
-                onPointerDown={(e) => onPointerDown(e, n)}
-                onPointerUp={() => onPointerUp(n)}
-                className={`absolute z-10 flex touch-none flex-col justify-center rounded-lg border-2 bg-card px-3 text-left shadow-sm ${
-                  COLOR[n.color] ?? COLOR.emerald
-                } ${selectedId === n.id ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""} ${
-                  connectFrom === n.id ? "ring-2 ring-sky-400" : ""
-                }`}
-                style={{ left: n.x, top: n.y, width: NODE_W, height: NODE_H, cursor: "grab" }}
-              >
-                <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-foreground">
-                  <Share2Icon className="size-3.5 shrink-0" />
-                  <span className="truncate">{n.display_name}</span>
-                </div>
-                <div className="truncate text-[11px] text-muted-foreground">
-                  {n.property_count} 属性 · {n.instance_count ?? "—"} 实例
-                </div>
-                <button
-                  title="从此对象连关系"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => { e.stopPropagation(); setConnectFrom(n.id) }}
-                  className="absolute -right-2 top-1/2 size-4 -translate-y-1/2 rounded-full border border-border bg-background hover:bg-emerald-500"
-                />
-              </div>
-            ))}
-
-            {graph.nodes.length === 0 && !error && (
-              <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-                点右上角「新建对象类型」开始
-              </div>
-            )}
-          </div>
-        </div>
+      <div className="grid h-[clamp(380px,52vh,600px)] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <FlowCanvas
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          setNodes={setNodes}
+          onNodeClick={onNodeClick}
+          onNodeDragStop={onNodeDragStop}
+          onBeforeDelete={onBeforeDelete}
+          onEdgesDelete={onEdgesDelete}
+          direction="LR"
+          emptyHint="点右上角「新建对象类型」开始"
+        />
 
         {/* Side panel */}
         <div className="flex flex-col gap-3 overflow-auto rounded-xl border border-border bg-card p-4">
           {panel === "create" && (
             <>
-              <div className="text-sm font-semibold">新建对象类型</div>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">数据集</span>
+              <div className="text-xs font-semibold">新建对象类型</div>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[11px] text-muted-foreground">数据集</span>
                 <select value={cf.dataset_id} onChange={(e) => setCf({ ...cf, dataset_id: e.target.value })} className={inputCls}>
                   <option value="">（选择数据集）</option>
                   {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">API 名称（英文）</span>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[11px] text-muted-foreground">API 名称（英文）</span>
                 <input value={cf.api_name} onChange={(e) => setCf({ ...cf, api_name: e.target.value })} className={inputCls} placeholder="Customer" />
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">显示名</span>
+              <label className="flex flex-col gap-0.5">
+                <span className="text-[11px] text-muted-foreground">显示名</span>
                 <input value={cf.display_name} onChange={(e) => setCf({ ...cf, display_name: e.target.value })} className={inputCls} placeholder="客户" />
               </label>
               <div className="flex gap-2">
-                <Button size="sm" disabled={!cf.dataset_id || !cf.api_name || !cf.display_name} onClick={submitCreate}>创建</Button>
-                <Button size="sm" variant="ghost" onClick={() => setPanel("detail")}>取消</Button>
+                <Button size="xs" disabled={!cf.dataset_id || !cf.api_name || !cf.display_name} onClick={submitCreate}>创建</Button>
+                <Button size="xs" variant="ghost" onClick={() => setPanel("detail")}>取消</Button>
               </div>
-              <p className="text-xs text-muted-foreground">属性会从所选数据集的 schema 自动导入。</p>
+              <p className="text-[11px] text-muted-foreground">属性会从所选数据集的 schema 自动导入。</p>
             </>
           )}
 
@@ -384,7 +395,7 @@ export default function OntologyPage() {
           ) : (
             <div className="text-sm text-muted-foreground">
               选择一个对象类型查看属性/实例。<br />
-              点对象右侧圆点可拉一条关系。<br />
+              拖对象右侧手柄到另一对象可建一条关系。<br />
               点右上角「新建对象类型」添加。
             </div>
           ))}

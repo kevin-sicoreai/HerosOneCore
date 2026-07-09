@@ -48,17 +48,19 @@ def init_db() -> None:
                 db.add(Role(name=name, can_read=r, can_write=w, can_admin=a, ordinal=i))
             db.commit()
 
-        # bootstrap admin user with the platform-admin role
-        if db.query(User).count() == 0:
-            digest, salt = hash_password(settings.bootstrap_admin_password)
-            admin = User(
-                username=settings.bootstrap_admin_username,
-                email="admin@askdelphi.local",
-                password_hash=digest,
-                salt=salt,
-            )
-            admin_role = db.scalar(select(Role).where(Role.name == "平台管理员"))
-            if admin_role:
-                admin.roles.append(admin_role)
-            db.add(admin)
-            db.commit()
+        # Seed demo users (idempotent by username): a platform admin (full rights)
+        # and a data analyst (read/write but no delete/admin) to show enforcement.
+        seed_users = [
+            (settings.bootstrap_admin_username, settings.bootstrap_admin_password, "平台管理员", "admin@askdelphi.local"),
+            ("analyst", "analyst", "数据分析师", "analyst@askdelphi.local"),
+        ]
+        for username, password, role_name, email in seed_users:
+            if db.scalar(select(User).where(User.username == username)) is not None:
+                continue
+            digest, salt = hash_password(password)
+            user = User(username=username, email=email, password_hash=digest, salt=salt)
+            role = db.scalar(select(Role).where(Role.name == role_name))
+            if role:
+                user.roles.append(role)
+            db.add(user)
+        db.commit()

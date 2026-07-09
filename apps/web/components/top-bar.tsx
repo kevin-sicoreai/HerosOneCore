@@ -5,7 +5,6 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
-  ChevronsUpDownIcon,
   LogOutIcon,
   MoonIcon,
   SunIcon,
@@ -13,9 +12,7 @@ import {
 } from "lucide-react"
 
 import { authApi, clearToken, type Me } from "@/lib/auth-api"
-import { WORKSPACES } from "@/lib/mock"
 import { findApp } from "@/lib/apps"
-import { useWorkspace } from "@/components/workspace-context"
 import { AppLauncher } from "@/components/app-launcher"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -32,7 +29,6 @@ import {
 
 export function TopBar() {
   const pathname = usePathname()
-  const { workspace, setWorkspace } = useWorkspace()
   const app = findApp(pathname)
   const title = pathname === "/" ? "工作区" : (app?.title ?? "工作区")
 
@@ -41,34 +37,6 @@ export function TopBar() {
       <SidebarTrigger className="-ml-0.5" />
       <Separator orientation="vertical" className="mr-1 data-vertical:h-4 data-vertical:self-auto" />
 
-      {/* Workspace switcher */}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={<Button variant="ghost" size="sm" className="gap-1.5" />}
-        >
-          <span className={workspace.kind === "gotham" ? "text-violet-500" : "text-emerald-500"}>
-            ●
-          </span>
-          <span className="font-medium">{workspace.name}</span>
-          <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuLabel>切换工作区</DropdownMenuLabel>
-          {WORKSPACES.map((w) => (
-            <DropdownMenuItem key={w.id} onClick={() => setWorkspace(w)}>
-              <span className={w.kind === "gotham" ? "text-violet-500" : "text-emerald-500"}>
-                ●
-              </span>
-              <div className="flex flex-col">
-                <span>{w.name}</span>
-                <span className="text-xs text-muted-foreground">{w.desc}</span>
-              </div>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Separator orientation="vertical" className="mx-1 data-vertical:h-4 data-vertical:self-auto" />
       <span className="text-sm font-medium text-muted-foreground">{title}</span>
 
       <div className="ml-auto flex items-center gap-0.5">
