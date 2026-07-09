@@ -8,10 +8,12 @@ import {
   ChevronsUpDownIcon,
   ChevronUpIcon,
   FilterIcon,
+  LayoutDashboardIcon,
   Loader2Icon,
   MapIcon,
   PlusIcon,
   RadarIcon,
+  RefreshCwIcon,
   TableIcon,
   WifiOffIcon,
   XIcon,
@@ -36,9 +38,10 @@ import { Pagination } from "@/components/ui/pagination"
 
 // A lens is one way of looking at the current object set. The relationship
 // (schema) graph lives in the ontology manager, not here.
-type Lens = "table" | "chart" | "timeline" | "map"
+type Lens = "dashboard" | "table" | "chart" | "timeline" | "map"
 
 const LENSES: { key: Lens; label: string; icon: React.ElementType }[] = [
+  { key: "dashboard", label: "看板", icon: LayoutDashboardIcon },
   { key: "table", label: "表格", icon: TableIcon },
   { key: "chart", label: "图表", icon: BarChart3Icon },
   { key: "timeline", label: "时间轴", icon: CalendarClockIcon },
@@ -121,6 +124,14 @@ export default function AnalysisPage() {
   const [chartMetricKey, setChartMetricKey] = React.useState<string>("")
   const [chartDimKey, setChartDimKey] = React.useState<string>("")
   const [metricResult, setMetricResult] = React.useState<MetricQueryResult | null>(null)
+  // Dashboard (global-overview) lens: one entry per platform metric definition,
+  // built from the metric catalog — independent of the selected object type /
+  // filters. `total` is null when its query failed (the card shows a failure
+  // note); `byDim` is null when the metric has no dimension or its query failed.
+  const [dashData, setDashData] = React.useState<
+    { metric: Metric; total: MetricQueryResult | null; byDim: MetricQueryResult | null }[] | null
+  >(null)
+  const [dashLoading, setDashLoading] = React.useState(false)
 
   const table = tables.find((t) => t.name === tableName) ?? null
   const dimensions = table?.columns.filter((c) => c.kind === "dimension" && c.name !== "id") ?? []
@@ -139,14 +150,19 @@ export default function AnalysisPage() {
 
   const lensAvailable = React.useCallback(
     (l: Lens) =>
-      l === "timeline"
-        ? !!timeCol
-        : l === "map"
-          ? !!geoCol
-          : l === "chart"
-            ? chartMetrics.length > 0
-            : true,
-    [timeCol, geoCol, chartMetrics]
+      // The dashboard is a global overview driven by the metric catalog, so its
+      // availability tracks metric definitions only — never the object type.
+      // This keeps the fall-back effect below from evicting it on type switches.
+      l === "dashboard"
+        ? allMetrics.length > 0
+        : l === "timeline"
+          ? !!timeCol
+          : l === "map"
+            ? !!geoCol
+            : l === "chart"
+              ? chartMetrics.length > 0
+              : true,
+    [allMetrics, timeCol, geoCol, chartMetrics]
   )
 
   // Load the catalog + metric definitions, select the first table.
@@ -302,6 +318,44 @@ export default function AnalysisPage() {
     }, 300)
     return () => window.clearTimeout(timer)
   }, [lens, chartMetricKey, chartDimKey, filters])
+
+  // Dashboard lens: fan out one overall query per metric (plus a first-dimension
+  // breakdown when the metric has dimensions) and gather them with Promise.all.
+  // A single query failing must not sink the whole board — each is caught to null
+  // so the affected card / panel degrades on its own. No filters/object-set input:
+  // the board is a platform-wide overview.
+  const loadDashboard = React.useCallback(() => {
+    if (allMetrics.length === 0) return
+    const snapshot = allMetrics
+    setDashLoading(true)
+    Promise.all(
+      snapshot.map(async (m) => {
+        const total = await analysisApi.queryMetric({ metric: m.key }).catch(() => null)
+        let byDim: MetricQueryResult | null = null
+        if (m.dimensions.length > 0) {
+          byDim = await analysisApi
+            .queryMetric({ metric: m.key, dimension: m.dimensions[0].key, limit: 8 })
+            .catch(() => null)
+        }
+        return { metric: m, total, byDim }
+      })
+    )
+      .then(setDashData)
+      .finally(() => setDashLoading(false))
+  }, [allMetrics])
+
+  // Invalidate any cached board whenever the metric catalog changes, so the board
+  // auto-rebuilds for a new scenario / added metric on next entry.
+  React.useEffect(() => {
+    setDashData(null)
+  }, [allMetrics])
+
+  // Build the board on entering the dashboard lens with no cached data. The
+  // refresh button forces a rebuild by calling loadDashboard directly.
+  React.useEffect(() => {
+    if (lens !== "dashboard" || dashData !== null) return
+    loadDashboard()
+  }, [lens, dashData, loadDashboard])
 
   // Drill from the map into the detail table filtered to one geo value.
   function drillGeo(value: string) {
@@ -493,13 +547,15 @@ export default function AnalysisPage() {
               {LENSES.map((l) => {
                 const disabled = !lensAvailable(l.key)
                 const disabledTitle =
-                  l.key === "timeline"
-                    ? "当前对象类型无时间属性"
-                    : l.key === "map"
-                      ? "当前对象类型无地理属性"
-                      : l.key === "chart"
-                        ? "当前对象类型无可用指标"
-                        : undefined
+                  l.key === "dashboard"
+                    ? "暂无指标定义"
+                    : l.key === "timeline"
+                      ? "当前对象类型无时间属性"
+                      : l.key === "map"
+                        ? "当前对象类型无地理属性"
+                        : l.key === "chart"
+                          ? "当前对象类型无可用指标"
+                          : undefined
                 return (
                   <button
                     key={l.key}
@@ -518,9 +574,11 @@ export default function AnalysisPage() {
               })}
             </div>
             <div className="ml-auto truncate text-xs text-muted-foreground">
-              {table
-                ? `分析上下文：${table.label} · 命中 ${(result?.matched_rows ?? 0).toLocaleString()} 行`
-                : ""}
+              {lens === "dashboard"
+                ? `全局概览 · ${allMetrics.length} 个指标`
+                : table
+                  ? `分析上下文：${table.label} · 命中 ${(result?.matched_rows ?? 0).toLocaleString()} 行`
+                  : ""}
             </div>
           </div>
 
@@ -531,6 +589,16 @@ export default function AnalysisPage() {
           )}
 
           {/* Data area — takes all remaining height in the right column. */}
+          {lens === "dashboard" && (
+            <DashboardCanvas
+              data={dashData}
+              loading={dashLoading}
+              metricCount={allMetrics.length}
+              offline={offline}
+              onRefresh={loadDashboard}
+            />
+          )}
+
           {lens === "table" && (
             <div className="relative flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card">
               {/* Lightweight in-flight hint: a thin top bar plus a corner spinner.
@@ -782,6 +850,150 @@ function ChartStatStrip({ metricResult }: { metricResult: MetricQueryResult | nu
         value={formatMetricValue(metricResult.total, metricResult.agg, metricResult.unit)}
       />
       <Stat label="命中记录" value={formatValue(metricResult.matched_rows)} />
+    </div>
+  )
+}
+
+// --- Dashboard lens canvas: a platform-wide overview generated from the metric
+// catalog — stat cards for every metric plus a bar-chart panel per dimensioned
+// metric. No hardcoded scenario content: it re-derives from `data` entirely. ---
+
+function DashboardCanvas({
+  data,
+  loading,
+  metricCount,
+  offline,
+  onRefresh,
+}: {
+  data: { metric: Metric; total: MetricQueryResult | null; byDim: MetricQueryResult | null }[] | null
+  loading: boolean
+  metricCount: number
+  offline: boolean
+  onRefresh: () => void
+}) {
+  // First load (no cached board yet): a centered spinner, or an offline / empty
+  // notice when there is nothing to build from.
+  if (!data) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
+        {offline ? (
+          "分析服务未启动"
+        ) : metricCount === 0 ? (
+          "暂无指标定义"
+        ) : (
+          <Loader2Icon className="size-5 animate-spin text-emerald-500" />
+        )}
+      </div>
+    )
+  }
+
+  // Only dimensioned metrics get a breakdown panel.
+  const withDim = data.filter((d) => d.metric.dimensions.length > 0)
+
+  return (
+    <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card p-4">
+      {/* Global-overview note + manual refresh (no auto-polling). */}
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">看板为全局概览，不受对象集与过滤影响</span>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+        >
+          <RefreshCwIcon className={`size-3 ${loading ? "animate-spin" : ""}`} /> 刷新
+        </button>
+      </div>
+
+      {/* Dim the body while refreshing over cached content (never flash empty). */}
+      <div className={`transition-opacity ${loading ? "opacity-60" : ""}`}>
+        {/* Stat cards: one per metric, showing its overall value. */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+          {data.map((d) => (
+            <div
+              key={d.metric.key}
+              className="rounded-lg border border-border bg-background/40 p-3"
+            >
+              <div className="truncate text-xs text-muted-foreground" title={d.metric.label}>
+                {d.metric.label}
+              </div>
+              {d.total ? (
+                <>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums">
+                    {formatMetricValue(d.total.total, d.total.agg, d.total.unit)}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    基于 {d.total.matched_rows.toLocaleString()} 个对象
+                  </div>
+                </>
+              ) : (
+                <div className="mt-2 text-sm text-muted-foreground">加载失败</div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Chart grid: a horizontal bar panel per dimensioned metric. */}
+        {withDim.length > 0 && (
+          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {withDim.map((d) => (
+              <DashboardChartPanel key={d.metric.key} metric={d.metric} byDim={d.byDim} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// A single dashboard breakdown panel: metric label + "按{dimension}" title with a
+// reused horizontal-bar rendering (name left, bar centre, value right).
+function DashboardChartPanel({
+  metric,
+  byDim,
+}: {
+  metric: Metric
+  byDim: MetricQueryResult | null
+}) {
+  const rows = byDim?.rows ?? []
+  const max = rows.reduce((m, r) => Math.max(m, r.value), 0)
+  // Fall back to the metric's own label/agg/unit when the breakdown query failed.
+  const dimLabel = byDim?.dimension_label ?? metric.dimensions[0]?.label ?? ""
+  const agg = byDim?.agg ?? metric.agg
+  const unit = byDim?.unit ?? metric.unit
+
+  return (
+    <div className="rounded-lg border border-border bg-background/40 p-3">
+      <div className="mb-2 truncate text-xs text-muted-foreground">
+        {metric.label} · 按{dimLabel}
+      </div>
+      {rows.length === 0 ? (
+        <div className="py-6 text-center text-sm text-muted-foreground">暂无数据</div>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map((r) => {
+            const pct = max > 0 ? Math.max((r.value / max) * 100, 1) : 0
+            return (
+              <div key={r.group} className="group flex items-center gap-3">
+                <div
+                  className="w-24 shrink-0 truncate text-right text-sm text-muted-foreground"
+                  title={r.group}
+                >
+                  {r.group}
+                </div>
+                <div className="relative h-5 min-w-0 flex-1 rounded-md bg-muted/40">
+                  <div
+                    className="h-full rounded-md bg-emerald-500/80 transition-colors group-hover:bg-emerald-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
+                  {formatMetricValue(r.value, agg, unit)}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
