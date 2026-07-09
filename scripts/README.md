@@ -60,6 +60,14 @@ scripts/seed/seed_hr.sh
 
 脚本会先幂等地创建 `hr` 库,再应用 `seed_hr.sql`(14 张表:departments / positions / employees / attendance / payroll / applications / performance_reviews / trainings / training_records / promotions / transfers / leaves / interviews / contracts),末尾打印各表行数校验。无 Docker 时用 `USE_PSQL=1` 直连(见脚本头部注释)。
 
+灌完数据、服务全部启动后,用一键引导脚本重建平台元数据(连接器/同步/管道/本体/治理分级/中文显示名,全部幂等):
+
+```bash
+python scripts/seed/bootstrap_hr.py
+```
+
+**从零跑通 HR 场景的完整步骤(含验收清单)见 [docs/HR场景运行手册.md](../docs/HR场景运行手册.md)。**
+
 Notes:
 - Service start scripts run in the foreground; pass extra uvicorn args, e.g.
   `scripts/services/start_data.sh --reload`. Override `PORT`/`DATABASE_URL` via env.
