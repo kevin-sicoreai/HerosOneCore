@@ -1,0 +1,40 @@
+# PoC: employees cube over the platform data plane (Parquet via DuckDB).
+# Mirrors the self-built metric "hr_headcount 在编人数" with a cross-object
+# dimension (department name via join) to validate Cube as the metric layer.
+cubes:
+  - name: employees
+    sql: SELECT * FROM read_parquet('/data/raw/employees.parquet')
+
+    joins:
+      - name: departments
+        sql: "{CUBE}.department_id = {departments}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: status
+        sql: status
+        type: string
+      - name: city
+        sql: city
+        type: string
+      - name: department_id
+        sql: department_id
+        type: number
+
+    measures:
+      # 在编人数: count of employees whose status is 在职 (same口径 as hr_headcount).
+      - name: headcount_active
+        title: 在编人数
+        type: count
+        filters:
+          - sql: "{CUBE}.status = '在职'"
+      # 离职率: share of resigned employees, percent (same口径 as hr_attrition_rate).
+      - name: attrition_rate
+        title: 离职率
+        type: number
+        format: percent
+        sql: "ROUND(100.0 * COUNT(*) FILTER (WHERE {CUBE}.status = '离职') / COUNT(*), 1)"

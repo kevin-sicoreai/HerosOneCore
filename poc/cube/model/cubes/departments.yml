@@ -1,0 +1,19 @@
+# PoC: departments cube — the join target giving employees a cross-object
+# department-name dimension (mirrors the ontology link 所属部门).
+cubes:
+  - name: departments
+    sql: SELECT * FROM read_parquet('/data/raw/departments.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        title: 部门
+        sql: name
+        type: string
+      - name: city
+        title: 城市
+        sql: city
+        type: string

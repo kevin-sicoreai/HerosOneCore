@@ -41,8 +41,9 @@ ontology(8003)/governance(8004)。脚本已内置必需环境变量,其中两个
 analysis(8008)与 assist(8006)没有独立启动脚本,手动启动:
 
 ```bash
-cd services/analysis && python -m uvicorn app.main:app --host 127.0.0.1 --port 8008
-cd services/assist   && python -m uvicorn app.main:app --host 127.0.0.1 --port 8006
+cd services/analysis    && python -m uvicorn app.main:app --host 127.0.0.1 --port 8008
+cd services/assist      && python -m uvicorn app.main:app --host 127.0.0.1 --port 8006
+cd services/app-builder && python -m uvicorn app.main:app --host 127.0.0.1 --port 8002
 ```
 
 assist 需要 LLM Key:复制 `services/assist/.env.example` 为 `.env`,

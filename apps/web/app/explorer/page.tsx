@@ -3,17 +3,27 @@
 import * as React from "react"
 import {
   BoxesIcon,
+  CalendarClockIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
   FilterIcon,
   Loader2Icon,
+  MapIcon,
   SearchIcon,
   Share2Icon,
+  TableIcon,
   XIcon,
 } from "lucide-react"
 
-import { ontologyApi, type GraphNode, type OntologyGraph } from "@/lib/ontology-api"
+import { ontologyApi, type GraphNode, type OntologyGraph, type Property } from "@/lib/ontology-api"
+import {
+  analysisApi,
+  type AnalysisColumn,
+  type FilterOp,
+  type FilterSpec,
+} from "@/lib/analysis-api"
 import { fieldLabel } from "@/lib/field-labels"
+import { MapView, TimelineView } from "@/components/object-lenses"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
@@ -159,7 +169,7 @@ export default function ExplorerPage() {
               onOpen={open}
             />
           ) : (
-            <InstanceList focus={selectedNode} pkColOf={pkColOf} onPick={pushFocus} />
+            <InstanceList focus={selectedNode} onPick={pushFocus} />
           )}
         </div>
       </div>
@@ -184,21 +194,36 @@ const FACET_VALUES_SHOWN = 8
 // One filterable property and its value distribution, derived from loaded rows.
 type Facet = { col: string; values: { value: string; count: number }[] }
 
+// The three ways to look at an object set: the instance table (default), a
+// newest-first timeline, and a geographic distribution. Timeline/map are gated
+// on the type having a time / geo property (see capability detection below).
+type ObjView = "list" | "timeline" | "map"
+
+// Rows pulled for the timeline lens (newest-first). This goes through the
+// analysis service (the object-set query engine) for the full set, not the
+// 500-row browse sample used by the list/facets.
+const TIMELINE_LIMIT = 200
+
+// Numeric source SQL types — a property with one of these is treated as a
+// measure when building lens columns (mirrors the analysis service).
+const LENS_NUMERIC = /^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)/i
+
 // List mode: the selected type's instances, searchable and filterable by property
 // facets. Clicking a row enters that object's focus (Object View) rather than
 // opening the governance drawer.
 function InstanceList({
   focus,
-  pkColOf,
   onPick,
 }: {
   focus: GraphNode
-  pkColOf: (otId: string) => Promise<string>
   onPick: (f: FocusObj) => void
 }) {
   const [columns, setColumns] = React.useState<string[]>([])
   const [rows, setRows] = React.useState<Record<string, unknown>[]>([])
   const [pkCol, setPkCol] = React.useState("id")
+  // The focused type's property list (from its detail) — drives time/geo
+  // capability detection and the lens column metadata.
+  const [properties, setProperties] = React.useState<Property[]>([])
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [q, setQ] = React.useState("")
@@ -208,6 +233,15 @@ function InstanceList({
   const [expandedFacets, setExpandedFacets] = React.useState<Record<string, boolean>>({})
   // Current client-side page of the filtered rows.
   const [page, setPage] = React.useState(1)
+  // Active view (list / timeline / map). Falls back to list on type switch.
+  const [view, setView] = React.useState<ObjView>("list")
+  // Lens data, fetched from the analysis service on demand (full set, not the
+  // browse sample). Timeline = newest-first detail rows; map = geo count agg.
+  const [timelineRows, setTimelineRows] = React.useState<Record<string, unknown>[]>([])
+  const [geoCounts, setGeoCounts] = React.useState<{ value: string; count: number }[]>([])
+  const [lensMatched, setLensMatched] = React.useState(0)
+  const [lensLoading, setLensLoading] = React.useState(false)
+  const [lensError, setLensError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     let cancelled = false
@@ -217,12 +251,18 @@ function InstanceList({
     setSelected({})
     setExpandedFacets({})
     setPage(1)
+    setView("list")
+    setProperties([])
     ;(async () => {
       try {
-        const col = await pkColOf(focus.id)
-        const list = await ontologyApi.objects(focus.id, INSTANCE_LIMIT)
+        // Detail (for pk + properties) and the browse sample load together.
+        const [detail, list] = await Promise.all([
+          ontologyApi.objectType(focus.id),
+          ontologyApi.objects(focus.id, INSTANCE_LIMIT),
+        ])
         if (cancelled) return
-        setPkCol(col)
+        setPkCol(detail.primary_key ?? "id")
+        setProperties(detail.properties)
         setColumns(list.columns)
         setRows(list.rows)
       } catch {
@@ -234,7 +274,7 @@ function InstanceList({
     return () => {
       cancelled = true
     }
-  }, [focus.id, pkColOf])
+  }, [focus.id])
 
   const labelOf = (r: Record<string, unknown>) => (r["name"] ? String(r["name"]) : String(r[pkCol]))
 
@@ -273,6 +313,112 @@ function InstanceList({
     [selected]
   )
 
+  // --- Object-set lens plumbing (timeline / map). ---
+
+  // Lens column metadata built from the type's properties (label + measure /
+  // dimension kind), reused by TimelineView / MapView.
+  const lensColumns = React.useMemo<AnalysisColumn[]>(
+    () =>
+      properties.map((p) => ({
+        name: p.name,
+        label: fieldLabel(p.name),
+        kind: LENS_NUMERIC.test(p.data_type) ? "measure" : "dimension",
+        data_type: p.data_type,
+      })),
+    [properties]
+  )
+  // Capability detection: the first DATE/TIMESTAMP property enables the timeline;
+  // a city/region property enables the map. Null → the tab is disabled.
+  const timeCol =
+    lensColumns.find((c) => c.data_type && /^(DATE|TIMESTAMP)/i.test(c.data_type)) ?? null
+  const geoCol = lensColumns.find((c) => c.name === "city" || c.name === "region") ?? null
+
+  // Facet selections mapped to analysis filters: a single-valued facet becomes an
+  // eq filter; a multi-selected facet is skipped (OR-of-values isn't expressible
+  // in the filter contract) and surfaced as a note on the lens. The full-text
+  // search box is list-only and never mapped.
+  const lensFilters = React.useMemo<FilterSpec[]>(
+    () =>
+      activeFacets
+        .filter(([, set]) => set.size === 1)
+        .map(([col, set]) => ({ field: col, op: "eq" as FilterOp, value: [...set][0] })),
+    [activeFacets]
+  )
+  const skippedMultiFacets = activeFacets.filter(([, set]) => set.size > 1)
+
+  // Timeline lens: newest-first detail slice over the full set via the analysis
+  // service (ordered server-side by the time property).
+  React.useEffect(() => {
+    if (view !== "timeline" || !timeCol) return
+    let cancelled = false
+    setLensLoading(true)
+    setLensError(null)
+    analysisApi
+      .analyze({
+        table: focus.api_name,
+        group_by: null,
+        metrics: [],
+        filters: lensFilters,
+        page: 1,
+        page_size: TIMELINE_LIMIT,
+        order_by: timeCol.name,
+        order_dir: "desc",
+      })
+      .then((r) => {
+        if (cancelled) return
+        setTimelineRows(r.rows as Record<string, unknown>[])
+        setLensMatched(r.matched_rows)
+      })
+      .catch(() => {
+        if (!cancelled) setLensError("分析服务未启动或查询失败")
+      })
+      .finally(() => {
+        if (!cancelled) setLensLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [view, focus.api_name, timeCol, lensFilters])
+
+  // Map lens: server-side count-per-geo aggregate mapped to {value, count}.
+  React.useEffect(() => {
+    if (view !== "map" || !geoCol) return
+    let cancelled = false
+    setLensLoading(true)
+    setLensError(null)
+    analysisApi
+      .analyze({
+        table: focus.api_name,
+        group_by: geoCol.name,
+        metrics: [{ field: geoCol.name, agg: "count" }],
+        filters: lensFilters,
+      })
+      .then((r) => {
+        if (cancelled) return
+        setGeoCounts(
+          r.rows.map((row) => ({ value: String(row.group ?? ""), count: Number(row.m0 ?? 0) }))
+        )
+        setLensMatched(r.matched_rows)
+      })
+      .catch(() => {
+        if (!cancelled) setLensError("分析服务未启动或查询失败")
+      })
+      .finally(() => {
+        if (!cancelled) setLensLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [view, focus.api_name, geoCol, lensFilters])
+
+  // Map point drill-in: pin the clicked value as the geo facet's sole selection
+  // and switch back to the list to show those instances.
+  function drillGeo(value: string) {
+    if (!geoCol) return
+    setSelected((prev) => ({ ...prev, [geoCol.name]: new Set([value]) }))
+    setView("list")
+  }
+
   const filtered = rows.filter((r) => {
     if (
       q !== "" &&
@@ -308,17 +454,61 @@ function InstanceList({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-        <div className="relative w-full max-w-xs">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索…"
-            className="h-8 w-full rounded-lg border border-input bg-transparent pr-2 pl-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-          />
+      {/* View switcher — 列表 / 时间轴 / 地图 (analysis-page lens-bar styling). */}
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+          {(
+            [
+              { key: "list", label: "列表", Icon: TableIcon, enabled: true, hint: "" },
+              {
+                key: "timeline",
+                label: "时间轴",
+                Icon: CalendarClockIcon,
+                enabled: !!timeCol,
+                hint: "当前对象类型无时间属性",
+              },
+              {
+                key: "map",
+                label: "地图",
+                Icon: MapIcon,
+                enabled: !!geoCol,
+                hint: "当前对象类型无地理属性",
+              },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => t.enabled && setView(t.key)}
+              disabled={!t.enabled}
+              title={!t.enabled ? t.hint : undefined}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                !t.enabled ? "cursor-not-allowed opacity-50" : ""
+              } ${
+                view === t.key
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <t.Icon className="size-4" /> {t.label}
+            </button>
+          ))}
         </div>
-        {/* Active facet filters as removable chips */}
+      </div>
+
+      {/* Toolbar: search (list only) + active facet chips + count / lens note. */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
+        {view === "list" && (
+          <div className="relative w-full max-w-xs">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="搜索…"
+              className="h-8 w-full rounded-lg border border-input bg-transparent pr-2 pl-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+            />
+          </div>
+        )}
+        {/* Active facet filters as removable chips (shown across all views). */}
         {activeFacets.flatMap(([col, set]) =>
           [...set].map((value) => (
             <button
@@ -332,8 +522,21 @@ function InstanceList({
             </button>
           ))
         )}
-        <span className="ml-auto text-xs text-muted-foreground">{filtered.length} 个对象</span>
+        {/* Multi-select facets can't map to the lens filter contract — say so. */}
+        {view !== "list" && skippedMultiFacets.length > 0 && (
+          <span className="text-xs text-amber-600 dark:text-amber-400">
+            多选分面未应用于此视图：
+            {skippedMultiFacets.map(([col]) => fieldLabel(col)).join("、")}
+          </span>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">
+          {view === "list"
+            ? `${filtered.length} 个对象`
+            : `共 ${lensMatched.toLocaleString()} 条（全量）`}
+        </span>
       </div>
+
+      {view === "list" ? (
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Table */}
         <div className="order-2 flex min-h-0 flex-1 flex-col lg:order-1">
@@ -450,6 +653,24 @@ function InstanceList({
           </div>
         )}
       </div>
+      ) : (
+        // Lens body: timeline / map, fed by the analysis service over the full
+        // object set (filtered by the mapped facet selections).
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {lensError ? (
+            <div className="py-10 text-center text-sm text-red-500">{lensError}</div>
+          ) : lensLoading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" />
+              加载{view === "timeline" ? "时间轴" : "地图"}…
+            </div>
+          ) : view === "timeline" && timeCol ? (
+            <TimelineView rows={timelineRows} columns={lensColumns} timeCol={timeCol} />
+          ) : view === "map" && geoCol ? (
+            <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} />
+          ) : null}
+        </div>
+      )}
     </>
   )
 }

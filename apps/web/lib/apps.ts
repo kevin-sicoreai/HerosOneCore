@@ -2,7 +2,8 @@ import {
   BotIcon,
   BoxesIcon,
   DatabaseIcon,
-  RadarIcon,
+  LayoutDashboardIcon,
+  LayoutGridIcon,
   Share2Icon,
   ShieldCheckIcon,
   WorkflowIcon,
@@ -24,7 +25,9 @@ export type AppDef = {
 }
 
 // The App launcher / left-rail registry, grouped by the architecture's layers.
-// AIP sits on top; Governance is cross-cutting but also gets a console.
+// AIP sits on top; dataset-level BI is delegated to Superset (see /bi/*), while
+// object-level exploration stays first-party (see /explorer). Governance is
+// cross-cutting but also gets a console.
 export const APP_LAYERS: AppLayer[] = [
   {
     key: "aip",
@@ -40,22 +43,46 @@ export const APP_LAYERS: AppLayer[] = [
     ],
   },
   {
-    key: "analysis",
-    label: "分析与应用",
+    // Business applications assembled in the app builder (Puck) and served by
+    // the native runtime. The builder is entered through the catalog, so this
+    // layer surfaces a single "应用目录" item rather than a separate builder link.
+    key: "apps",
+    label: "业务应用",
     apps: [
       {
-        key: "analysis",
-        title: "分析工作台",
-        href: "/analysis",
-        icon: RadarIcon,
-        desc: "图谱 / 时间轴 / 地图 / 表格",
+        key: "apps",
+        title: "应用目录",
+        href: "/apps",
+        icon: LayoutGridIcon,
+        desc: "搭建与运行业务应用 · Puck 驱动",
       },
+    ],
+  },
+  {
+    key: "analytics",
+    label: "分析洞察",
+    apps: [
+      {
+        // Native metrics workbench (headless principle: engines stay behind
+        // the platform's own pages — no third-party UI embedded or linked).
+        key: "analysis",
+        title: "指标与看板",
+        href: "/analysis",
+        icon: LayoutDashboardIcon,
+        desc: "看板 · 指标图表 · 聚合与明细分析",
+      },
+    ],
+  },
+  {
+    key: "explore",
+    label: "对象探索",
+    apps: [
       {
         key: "explorer",
         title: "对象浏览器",
         href: "/explorer",
         icon: BoxesIcon,
-        desc: "浏览本体对象实例",
+        desc: "浏览本体对象实例 · 时间轴 / 地图",
       },
     ],
   },
