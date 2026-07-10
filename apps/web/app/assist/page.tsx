@@ -409,8 +409,11 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
             </div>
           )}
 
-          {/* Metric chart cards — data straight from the query_metric tool. */}
-          {m.charts.length > 0 && (
+          {/* Metric chart cards — data straight from the query_metric tool.
+              Buffered while streaming (chart events arrive before answer
+              tokens) and revealed only after the answer completes, so the
+              streaming text stays in view instead of being pushed around. */}
+          {!m.streaming && m.charts.length > 0 && (
             <div className="space-y-2">
               {m.charts.map((c, i) => (
                 <div key={i} className="rounded-lg border border-border bg-card p-3">
