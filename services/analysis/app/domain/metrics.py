@@ -58,6 +58,18 @@ class Metric:
     base_filters: list[tuple[str, str]] = field(default_factory=list)
 
 
+# Chinese display labels for the base object types metrics aggregate over.
+# Shared by the metric catalog (API) and query results (a metric's "data
+# source" is its base type — consumers link it to that type's lineage).
+BASE_LABELS: dict[str, str] = {
+    "employee": "员工",
+    "department": "部门",
+    "position": "职位",
+    "performance_review": "绩效考核",
+    "application": "招聘投递",
+    "training_record": "培训记录",
+}
+
 # Registry keyed by metric.key. Covers the HR-only scenario (场景 8.2). Cross-object
 # slices use the link-join mechanism: employee → 所属部门 → department.name for the
 # department slice, employee → 担任职位 → position.level for the job-grade slice.

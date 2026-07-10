@@ -93,6 +93,7 @@ desktop.ini
 # AskDelphi Python service artifacts
 *.egg-info/
 data_service.db
+analysis.db
 assist_service.db
 marketplace_service.db
 app_builder_service.db

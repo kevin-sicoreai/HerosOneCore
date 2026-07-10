@@ -160,7 +160,12 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
               </TabsList>
 
               <TabsContent value="lineage" className="pt-3">
-                {!node && !loading ? (
+                {/* Order matters: while loading, show neither the empty flow
+                    ("无上游/无下游") nor the not-found note — both would flash
+                    misleading states before the graph arrives. */}
+                {loading ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">加载血缘…</p>
+                ) : !node ? (
                   <p className="py-6 text-center text-sm text-muted-foreground">该资源不在血缘图中</p>
                 ) : (
                   <LineageFlow up={upLevels} down={downLevels} current={govKey ?? "当前资源"} />
@@ -234,7 +239,9 @@ function LineageFlow({ up, down, current }: { up: string[][]; down: string[][]; 
       ) : (
         upDisplay.map((level, li) => (
           <React.Fragment key={`u${li}`}>
-            {level.map((label) => <FlowRow key={label} label={label} />)}
+            {/* Index-composite keys: distinct lineage nodes may share a display
+                label (e.g. a dataset and the object type built on it). */}
+            {level.map((label, i) => <FlowRow key={`${i}-${label}`} label={label} />)}
             <FlowArrow />
           </React.Fragment>
         ))
@@ -248,7 +255,7 @@ function LineageFlow({ up, down, current }: { up: string[][]; down: string[][]; 
         down.map((level, li) => (
           <React.Fragment key={`d${li}`}>
             <FlowArrow />
-            {level.map((label) => <FlowRow key={label} label={label} />)}
+            {level.map((label, i) => <FlowRow key={`${i}-${label}`} label={label} />)}
           </React.Fragment>
         ))
       )}

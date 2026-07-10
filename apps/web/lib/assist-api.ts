@@ -21,9 +21,27 @@ export type DeviceCard = {
   failureRate: number
 }
 
+export type MetricChartRow = {
+  group: string
+  value: number
+}
+
+// A metric bar-chart card emitted under an answer. Built server-side straight
+// from the query_metric tool result, so the numbers match the metric layer.
+export type ChartPayload = {
+  title: string
+  unit: string | null
+  agg: string | null
+  rows: MetricChartRow[]
+  total?: number | null
+  matched_rows?: number | null
+}
+
 export type ChatExtras = {
   sources: string[]
   devices: DeviceCard[]
+  // Optional so pre-chart stored messages (no charts field) still parse.
+  charts?: ChartPayload[]
 }
 
 export type ChatSession = {
@@ -46,7 +64,8 @@ export type StreamEvent =
   | ({ type: "step_start" } & TraceStep)
   | { type: "step_end"; id: string; meta: string }
   | { type: "token"; text: string }
-  | { type: "done"; message_id: string; sources: string[]; devices: DeviceCard[] }
+  | ({ type: "chart" } & ChartPayload)
+  | { type: "done"; message_id: string; sources: string[]; devices: DeviceCard[]; charts?: ChartPayload[] }
   | { type: "error"; message: string }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {

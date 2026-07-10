@@ -11,6 +11,7 @@ import {
   SearchIcon,
   SendIcon,
   SparklesIcon,
+  Trash2Icon,
   ZapIcon,
 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
@@ -19,11 +20,13 @@ import remarkGfm from "remark-gfm"
 import {
   assistApi,
   timeAgo,
+  type ChartPayload,
   type ChatExtras,
   type ChatSession,
   type TraceIcon,
   type TraceStep,
 } from "@/lib/assist-api"
+import { MetricBarChart } from "@/components/metric-bar-chart"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -48,6 +51,9 @@ type UIMessage = {
   content: string
   trace: TraceStep[]
   extras: ChatExtras | null
+  // Chart cards for this message: streamed live via "chart" events, or
+  // hydrated from extras.charts when replaying a stored conversation.
+  charts: ChartPayload[]
   streaming?: boolean
   error?: string | null
 }
@@ -104,6 +110,7 @@ function AssistInner() {
         content: m.content,
         trace: m.trace ?? [],
         extras: m.extras ?? null,
+        charts: m.extras?.charts ?? [],
       }))
     )
   }
@@ -113,6 +120,27 @@ function AssistInner() {
     setSessions((prev) => [s, ...prev])
     setActiveId(s.id)
     setMessages([])
+  }
+
+  async function deleteSession(id: string) {
+    try {
+      await assistApi.deleteSession(id)
+    } catch {
+      return
+    }
+    const remaining = sessions.filter((s) => s.id !== id)
+    setSessions(remaining)
+    // If the open session was deleted, fall back to the most recent remaining
+    // one; when none are left, return to the empty "new session" state (same
+    // reset newSession/send rely on: null id + no messages).
+    if (id === activeId) {
+      if (remaining.length > 0) {
+        openSession(remaining[0].id)
+      } else {
+        setActiveId(null)
+        setMessages([])
+      }
+    }
   }
 
   async function send(text: string) {
@@ -132,8 +160,8 @@ function AssistInner() {
       const assistantKey = `a-${Date.now()}`
       setMessages((prev) => [
         ...prev,
-        { key: `u-${Date.now()}`, role: "user", content, trace: [], extras: null },
-        { key: assistantKey, role: "assistant", content: "", trace: [], extras: null, streaming: true },
+        { key: `u-${Date.now()}`, role: "user", content, trace: [], extras: null, charts: [] },
+        { key: assistantKey, role: "assistant", content: "", trace: [], extras: null, charts: [], streaming: true },
       ])
 
       const patch = (fn: (m: UIMessage) => UIMessage) =>
@@ -150,11 +178,14 @@ function AssistInner() {
           }))
         } else if (ev.type === "token") {
           patch((m) => ({ ...m, content: m.content + ev.text }))
+        } else if (ev.type === "chart") {
+          const { type: _t, ...chart } = ev
+          patch((m) => ({ ...m, charts: [...m.charts, chart as ChartPayload] }))
         } else if (ev.type === "done") {
           patch((m) => ({
             ...m,
             streaming: false,
-            extras: { sources: ev.sources, devices: ev.devices },
+            extras: { sources: ev.sources, devices: ev.devices, charts: m.charts },
           }))
           assistApi.sessions().then(setSessions).catch(() => {})
         } else if (ev.type === "error") {
@@ -183,16 +214,13 @@ function AssistInner() {
         <div className="mb-1.5 px-1 text-xs font-medium text-muted-foreground">会话历史</div>
         <div className="min-h-0 flex-1 space-y-0.5 overflow-auto">
           {sessions.map((s) => (
-            <button
+            <SessionItem
               key={s.id}
-              onClick={() => openSession(s.id)}
-              className={`flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
-                s.id === activeId ? "bg-muted" : "hover:bg-muted/60"
-              }`}
-            >
-              <span className="line-clamp-1">{s.title}</span>
-              <span className="text-xs text-muted-foreground">{timeAgo(s.updated_at)}</span>
-            </button>
+              session={s}
+              active={s.id === activeId}
+              onOpen={() => openSession(s.id)}
+              onDelete={() => deleteSession(s.id)}
+            />
           ))}
           {sessions.length === 0 && (
             <div className="px-2 py-1.5 text-xs text-muted-foreground">
@@ -269,6 +297,67 @@ function AssistInner() {
   )
 }
 
+// One session row. Delete uses a two-step confirm (no window.confirm): the
+// first click turns the button red; a second click within 3s deletes, else it
+// reverts. The trash button only appears on hover and never shifts the title.
+function SessionItem({
+  session,
+  active,
+  onOpen,
+  onDelete,
+}: {
+  session: ChatSession
+  active: boolean
+  onOpen: () => void
+  onDelete: () => void
+}) {
+  const [confirming, setConfirming] = React.useState(false)
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  React.useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    []
+  )
+
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation() // never open the session when hitting delete
+    if (!confirming) {
+      setConfirming(true)
+      timerRef.current = setTimeout(() => setConfirming(false), 3000)
+      return
+    }
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setConfirming(false)
+    onDelete()
+  }
+
+  return (
+    <div
+      onClick={onOpen}
+      className={`group relative flex cursor-pointer flex-col items-start rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+        active ? "bg-muted" : "hover:bg-muted/60"
+      } ${confirming ? "ring-1 ring-red-500/60" : ""}`}
+    >
+      <span className="line-clamp-1 pr-6">{session.title}</span>
+      <span className="text-xs text-muted-foreground">{timeAgo(session.updated_at)}</span>
+      <button
+        type="button"
+        onClick={handleDelete}
+        title={confirming ? "再次点击确认删除" : "删除会话"}
+        className={`absolute top-1.5 right-1.5 flex size-6 items-center justify-center rounded-md transition-opacity ${
+          confirming
+            ? "text-red-500 opacity-100"
+            : "text-muted-foreground opacity-0 hover:text-red-500 group-hover:opacity-100"
+        }`}
+      >
+        <Trash2Icon className="size-3.5" />
+      </button>
+    </div>
+  )
+}
+
 function AssistantMessage({ message, modelName }: { message: UIMessage; modelName: string }) {
   const { open } = useResourceDrawer()
   const m = message
@@ -317,6 +406,17 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
           {m.error && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-500">
               请求出错：{m.error}
+            </div>
+          )}
+
+          {/* Metric chart cards — data straight from the query_metric tool. */}
+          {m.charts.length > 0 && (
+            <div className="space-y-2">
+              {m.charts.map((c, i) => (
+                <div key={i} className="rounded-lg border border-border bg-card p-3">
+                  <MetricBarChart {...c} />
+                </div>
+              ))}
             </div>
           )}
 

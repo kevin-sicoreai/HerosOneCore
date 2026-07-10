@@ -2,22 +2,12 @@
 
 from fastapi import APIRouter
 
+from app.domain.metrics import BASE_LABELS as _BASE_LABELS
 from app.domain.metrics import METRICS
 from app.schemas.metrics import DimensionOut, MetricOut, MetricQueryRequest, MetricQueryResult
 from app.services import metric_query
 
 router = APIRouter(tags=["metrics"])
-
-# Display labels for base object types (api_name -> Chinese). Kept local to the
-# metric layer so its catalog reads in business terms.
-_BASE_LABELS = {
-    "employee": "员工",
-    "department": "部门",
-    "position": "职位",
-    "performance_review": "绩效考核",
-    "application": "招聘投递",
-    "training_record": "培训记录",
-}
 
 
 @router.get("/metrics", response_model=list[MetricOut])

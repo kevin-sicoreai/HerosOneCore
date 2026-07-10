@@ -30,6 +30,8 @@ def create_session(db: Session = Depends(get_db)) -> SessionOut:
 
 @router.delete("/sessions/{session_id}", status_code=204)
 def delete_session(session_id: str, db: Session = Depends(get_db)) -> None:
+    if store.get_session(db, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
     store.delete_session(db, session_id)
 
 

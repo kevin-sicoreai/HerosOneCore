@@ -39,6 +39,10 @@ class MetricGroupRow(BaseModel):
 class MetricQueryResult(BaseModel):
     metric_key: str
     metric_label: str
+    # Base object type the metric aggregates over — the metric's data source
+    # (consumers link "where does this number come from" to the type's lineage).
+    base_type: str = ""
+    base_label: str = ""
     dimension_key: str | None
     dimension_label: str | None
     agg: str

@@ -294,7 +294,8 @@ def list_metrics() -> str:
                 }
                 for m in metrics
             ],
-            "source": "指标层",
+            # No "source" here on purpose: the metric catalog is a definition
+            # list, not a lineage asset — it must not become a source chip.
         },
         ensure_ascii=False,
         default=str,
@@ -313,7 +314,7 @@ def query_metric(
         filter_field / filter_value: 可选，对基础对象类型某属性做等值过滤（如 filter_field="status", filter_value="已完成"）；都留空=不过滤。
 
     Returns:
-        JSON：{"metric","dimension","unit","agg","total","matched_rows","rows":[{"group","value"}]（降序，最多前 20 条），"source"}。
+        JSON：{"metric","metric_label","dimension","dimension_label","unit","agg","total","matched_rows","rows":[{"group","value"}]（降序，最多前 20 条），"source"}。
     """
     filters = (
         [{"field": filter_field, "op": "eq", "value": filter_value}]
@@ -326,16 +327,24 @@ def query_metric(
         )
     except httpx.HTTPError:
         return json.dumps({"error": "分析服务不可用，无法计算指标"}, ensure_ascii=False)
+    # Pass through the analysis service's display labels (metric_label /
+    # dimension_label) so both the model and the downstream chart card get the
+    # human-readable Chinese names, not the raw metric/dimension keys.
     return json.dumps(
         {
             "metric": data.get("metric_label"),
+            "metric_label": data.get("metric_label"),
             "dimension": data.get("dimension_label"),
+            "dimension_label": data.get("dimension_label"),
             "unit": data.get("unit"),
             "agg": data.get("agg"),
             "total": data.get("total"),
             "matched_rows": data.get("matched_rows"),
             "rows": data.get("rows", [])[:20],
-            "source": data.get("metric_label"),
+            # A metric's data source is its base object type (e.g. 员工) — that
+            # is a lineage asset the source chip can resolve, unlike the metric
+            # name itself which has no lineage node.
+            "source": data.get("base_label") or data.get("metric_label"),
         },
         ensure_ascii=False,
         default=str,

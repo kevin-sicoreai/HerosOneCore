@@ -13,7 +13,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.clients import ontology_service
-from app.domain.metrics import METRICS, Dimension, Metric
+from app.domain.metrics import BASE_LABELS, METRICS, Dimension, Metric
 from app.repositories import object_rows
 from app.schemas.analysis import FilterSpec
 from app.schemas.metrics import MetricGroupRow, MetricQueryResult
@@ -159,6 +159,8 @@ def query(metric_key: str, dimension_key: str | None, filters: list[FilterSpec],
     return MetricQueryResult(
         metric_key=metric.key,
         metric_label=metric.label,
+        base_type=metric.base_type,
+        base_label=BASE_LABELS.get(metric.base_type, metric.base_type),
         dimension_key=dim.key if dim else None,
         dimension_label=dim.label if dim else None,
         agg=metric.agg,

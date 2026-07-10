@@ -4,7 +4,11 @@ Event protocol (one JSON object per SSE `data:` line):
   {type: "step_start", id, icon, text, meta, status}   reasoning step begins
   {type: "step_end", id, meta}                          step finishes (✓)
   {type: "token", text}                                 answer text delta
-  {type: "done", message_id, sources, devices}          turn complete
+  {type: "chart", title, unit, agg, rows, total, matched_rows}
+                                                        metric bar-chart card
+                                                        (query_metric with a
+                                                        dimension breakdown)
+  {type: "done", message_id, sources, devices, charts}  turn complete
   {type: "error", message}                              agent failed
 """
 
@@ -103,6 +107,37 @@ def _summarize(name: str, output_text: str) -> tuple[str, list[str]]:
     return summary, sources
 
 
+def _chart_from_metric(output_text: str) -> dict | None:
+    """Build a chart-card payload from a query_metric tool result.
+
+    The chart is rendered from the tool output verbatim (no model re-narration),
+    so its numbers cannot drift from what the metric layer computed. Returns None
+    whenever the result cannot be charted — parse failure, missing fields, an
+    overall (dimension-less) value, or no rows — so the chart logic can never
+    break the conversation flow.
+    """
+    try:
+        data = json.loads(output_text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict) or data.get("error"):
+        return None
+    rows = data.get("rows") or []
+    dimension_label = data.get("dimension_label")
+    # A dimension-less overall value is a single number, not a bar chart.
+    if not rows or not dimension_label:
+        return None
+    metric_label = data.get("metric_label") or ""
+    return {
+        "title": f"{metric_label} · 按{dimension_label}",
+        "unit": data.get("unit"),
+        "agg": data.get("agg"),
+        "rows": rows[:10],
+        "total": data.get("total"),
+        "matched_rows": data.get("matched_rows"),
+    }
+
+
 @router.post("/sessions/{session_id}/chat")
 async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)):
     if store.get_session(db, session_id) is None:
@@ -119,6 +154,7 @@ async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)
         agent = get_agent()
         trace: list[dict] = []
         sources: list[str] = []
+        charts: list[dict] = []
         answer: list[str] = []
         started: dict[str, float] = {}
         model_step_open = False
@@ -157,7 +193,8 @@ async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)
                 elif kind == "on_tool_end":
                     rid = str(ev["run_id"])
                     elapsed = time.monotonic() - started.pop(rid, time.monotonic())
-                    summary, s = _summarize(ev["name"], _tool_output_text(ev["data"].get("output")))
+                    output_text = _tool_output_text(ev["data"].get("output"))
+                    summary, s = _summarize(ev["name"], output_text)
                     sources.extend(s)
                     meta = f"{summary} · {elapsed:.1f}s"
                     for step in trace:
@@ -165,6 +202,13 @@ async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)
                             step["meta"] = meta
                             step["status"] = "done"
                     yield _sse({"type": "step_end", "id": rid, "meta": meta})
+                    # A dimensioned metric query yields a chart card, rendered
+                    # from the tool output directly (zero model re-narration).
+                    if ev["name"] == "query_metric":
+                        chart = _chart_from_metric(output_text)
+                        if chart:
+                            charts.append(chart)
+                            yield _sse({"type": "chart", **chart})
 
         except Exception as exc:
             log.exception("agent stream failed (session=%s)", session_id)
@@ -185,6 +229,7 @@ async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)
         extras = {
             "sources": list(dict.fromkeys(sources)),
             "devices": [],
+            "charts": charts,
         }
         # The request-scoped db may already be torn down by now; use a fresh one.
         with SessionLocal() as fresh_db:
