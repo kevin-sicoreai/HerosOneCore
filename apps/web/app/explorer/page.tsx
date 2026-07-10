@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import {
+  BarChart3Icon,
   BoxesIcon,
   CalendarClockIcon,
   ChevronRightIcon,
@@ -9,25 +10,34 @@ import {
   FilterIcon,
   Loader2Icon,
   MapIcon,
+  RouteIcon,
   SearchIcon,
   Share2Icon,
   TableIcon,
   XIcon,
 } from "lucide-react"
 
-import { ontologyApi, type GraphNode, type OntologyGraph, type Property } from "@/lib/ontology-api"
 import {
-  analysisApi,
-  type AnalysisColumn,
-  type FilterOp,
-  type FilterSpec,
-} from "@/lib/analysis-api"
+  ontologyApi,
+  type GraphNode,
+  type LinkType,
+  type OntologyGraph,
+  type Property,
+} from "@/lib/ontology-api"
+import { analysisApi, type AnalysisColumn, type FilterSpec } from "@/lib/analysis-api"
+import {
+  collectPivotKeys,
+  facetFilters,
+  pivotDirections,
+  pivotInFilter,
+  type PivotDirection,
+} from "@/lib/object-set"
 import { fieldLabel } from "@/lib/field-labels"
 import { MapView, TimelineView } from "@/components/object-lenses"
+import { MetricBarChart } from "@/components/metric-bar-chart"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import { Pagination } from "@/components/ui/pagination"
 
 // Ontology node color -> Tailwind border/text classes (same map as the ontology page).
@@ -59,9 +69,17 @@ type FocusObj = {
 // time so rendering never has to await.
 type RelRow = { pk: string; label: string; row: Record<string, unknown> }
 
+// A derived object set produced by a "search around" pivot: the selected type is
+// switched to `targetTypeId` and an `in` filter pins it to the source set's keys.
+// `chainText` is the human-readable trail shown as a chip.
+type DerivedSet = { targetTypeId: string; inFilter: FilterSpec; chainText: string }
+
 export default function ExplorerPage() {
   const { open } = useResourceDrawer()
   const [graph, setGraph] = React.useState<OntologyGraph>({ nodes: [], links: [] })
+  const [linkTypes, setLinkTypes] = React.useState<LinkType[]>([])
+  // Non-null when the current type is being viewed as a pivot-derived set.
+  const [derived, setDerived] = React.useState<DerivedSet | null>(null)
   const [selectedTypeId, setSelectedTypeId] = React.useState<string | null>(null)
   // Empty = list mode (browse the selected type's instances); non-empty = focus
   // mode (the Object View of the last trail entry).
@@ -87,10 +105,12 @@ export default function ExplorerPage() {
   }, [graph])
 
   React.useEffect(() => {
-    ontologyApi
-      .graph()
-      .then((g) => {
+    // Graph (node metadata + edge list) and link types (join columns) load
+    // together; link types drive the set-level "search around" pivots.
+    Promise.all([ontologyApi.graph(), ontologyApi.linkTypes().catch(() => [])])
+      .then(([g, lts]) => {
         setGraph(g)
+        setLinkTypes(lts)
         if (g.nodes[0]) setSelectedTypeId(g.nodes[0].id)
       })
       .finally(() => setLoading(false))
@@ -102,6 +122,15 @@ export default function ExplorerPage() {
   function selectType(id: string) {
     setSelectedTypeId(id)
     setTrail([])
+    setDerived(null)
+  }
+
+  // Enter a pivot-derived set: switch to the peer type and pin it to the source
+  // set's keys. Trail (single-object focus) is reset so we land on the list.
+  function pivotTo(targetTypeId: string, inFilter: FilterSpec, chainText: string) {
+    setSelectedTypeId(targetTypeId)
+    setTrail([])
+    setDerived({ targetTypeId, inFilter, chainText })
   }
   const pushFocus = (f: FocusObj) => setTrail((t) => [...t, f])
   const truncateTo = (i: number) => setTrail((t) => t.slice(0, i + 1))
@@ -169,7 +198,15 @@ export default function ExplorerPage() {
               onOpen={open}
             />
           ) : (
-            <InstanceList focus={selectedNode} onPick={pushFocus} />
+            <InstanceList
+              focus={selectedNode}
+              onPick={pushFocus}
+              links={linkTypes}
+              nodeMap={typeMap}
+              derived={derived && derived.targetTypeId === selectedNode.id ? derived : null}
+              onPivot={pivotTo}
+              onClearDerived={() => setDerived(null)}
+            />
           )}
         </div>
       </div>
@@ -194,10 +231,16 @@ const FACET_VALUES_SHOWN = 8
 // One filterable property and its value distribution, derived from loaded rows.
 type Facet = { col: string; values: { value: string; count: number }[] }
 
-// The three ways to look at an object set: the instance table (default), a
-// newest-first timeline, and a geographic distribution. Timeline/map are gated
-// on the type having a time / geo property (see capability detection below).
-type ObjView = "list" | "timeline" | "map"
+// The ways to look at an object set: the instance table (default), a value
+// distribution (count by a chosen dimension), a newest-first timeline, and a
+// geographic map. Timeline/map are gated on the type having a time / geo
+// property (see capability detection below).
+type ObjView = "list" | "distribution" | "timeline" | "map"
+
+// Top-N groups shown in the distribution view (server sorts by count desc).
+const DISTRIBUTION_TOP = 20
+// Sample size for the pivot-derived detail set (fed to the list + facets).
+const DERIVED_SAMPLE_SIZE = 500
 
 // Rows pulled for the timeline lens (newest-first). This goes through the
 // analysis service (the object-set query engine) for the full set, not the
@@ -214,13 +257,25 @@ const LENS_NUMERIC = /^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|FLOAT|DOUBLE|DEC
 function InstanceList({
   focus,
   onPick,
+  links,
+  nodeMap,
+  derived,
+  onPivot,
+  onClearDerived,
 }: {
   focus: GraphNode
   onPick: (f: FocusObj) => void
+  links: LinkType[]
+  nodeMap: Map<string, GraphNode>
+  derived: DerivedSet | null
+  onPivot: (targetTypeId: string, inFilter: FilterSpec, chainText: string) => void
+  onClearDerived: () => void
 }) {
   const [columns, setColumns] = React.useState<string[]>([])
   const [rows, setRows] = React.useState<Record<string, unknown>[]>([])
   const [pkCol, setPkCol] = React.useState("id")
+  // Total matched rows of the pivot-derived set (from the /analyze detail load).
+  const [derivedMatched, setDerivedMatched] = React.useState(0)
   // The focused type's property list (from its detail) — drives time/geo
   // capability detection and the lens column metadata.
   const [properties, setProperties] = React.useState<Property[]>([])
@@ -242,6 +297,13 @@ function InstanceList({
   const [lensMatched, setLensMatched] = React.useState(0)
   const [lensLoading, setLensLoading] = React.useState(false)
   const [lensError, setLensError] = React.useState<string | null>(null)
+  // Distribution view: the chosen dimension + its count-by-value breakdown.
+  const [distAttr, setDistAttr] = React.useState<string>("")
+  const [distRows, setDistRows] = React.useState<{ group: string; value: number }[]>([])
+  // "Search around" menu + in-flight pivot state.
+  const [pivotMenuOpen, setPivotMenuOpen] = React.useState(false)
+  const [pivotBusy, setPivotBusy] = React.useState(false)
+  const [pivotError, setPivotError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     let cancelled = false
@@ -253,18 +315,39 @@ function InstanceList({
     setPage(1)
     setView("list")
     setProperties([])
+    setPivotMenuOpen(false)
+    setPivotError(null)
     ;(async () => {
       try {
-        // Detail (for pk + properties) and the browse sample load together.
-        const [detail, list] = await Promise.all([
-          ontologyApi.objectType(focus.id),
-          ontologyApi.objects(focus.id, INSTANCE_LIMIT),
-        ])
+        // Property/pk metadata always comes from the type detail; the sample rows
+        // come from the ontology browse endpoint for a plain type, or from the
+        // analysis service (detail mode over the `in` filter) for a derived set.
+        const detail = await ontologyApi.objectType(focus.id)
         if (cancelled) return
         setPkCol(detail.primary_key ?? "id")
         setProperties(detail.properties)
-        setColumns(list.columns)
-        setRows(list.rows)
+        if (derived) {
+          const res = await analysisApi.analyze({
+            table: focus.api_name,
+            group_by: null,
+            metrics: [],
+            filters: [derived.inFilter],
+            page: 1,
+            page_size: DERIVED_SAMPLE_SIZE,
+          })
+          if (cancelled) return
+          // Detail rows are keyed by English field name; the type's properties
+          // supply the column order + labels (analyze `columns` are labels).
+          setColumns(detail.properties.map((p) => p.name))
+          setRows(res.rows as Record<string, unknown>[])
+          setDerivedMatched(res.matched_rows)
+        } else {
+          const list = await ontologyApi.objects(focus.id, INSTANCE_LIMIT)
+          if (cancelled) return
+          setColumns(list.columns)
+          setRows(list.rows)
+          setDerivedMatched(0)
+        }
       } catch {
         if (!cancelled) setError("加载实例失败")
       } finally {
@@ -274,7 +357,7 @@ function InstanceList({
     return () => {
       cancelled = true
     }
-  }, [focus.id])
+  }, [focus.id, focus.api_name, derived])
 
   const labelOf = (r: Record<string, unknown>) => (r["name"] ? String(r["name"]) : String(r[pkCol]))
 
@@ -333,18 +416,37 @@ function InstanceList({
     lensColumns.find((c) => c.data_type && /^(DATE|TIMESTAMP)/i.test(c.data_type)) ?? null
   const geoCol = lensColumns.find((c) => c.name === "city" || c.name === "region") ?? null
 
-  // Facet selections mapped to analysis filters: a single-valued facet becomes an
-  // eq filter; a multi-selected facet is skipped (OR-of-values isn't expressible
-  // in the filter contract) and surfaced as a note on the lens. The full-text
-  // search box is list-only and never mapped.
+  // Facet selections mapped to analysis filters (single → eq, multi → in), plus
+  // the pivot-derived `in` filter when this is a derived set. Every lens
+  // (distribution / timeline / map) queries the analysis service with these, so
+  // a pivot flows through unchanged. The full-text search box is list-only.
   const lensFilters = React.useMemo<FilterSpec[]>(
+    () => [...facetFilters(selected), ...(derived ? [derived.inFilter] : [])],
+    [selected, derived]
+  )
+
+  // A short human summary of the active facet selections, for the pivot chain.
+  const facetSummary = React.useMemo(
     () =>
-      activeFacets
-        .filter(([, set]) => set.size === 1)
-        .map(([col, set]) => ({ field: col, op: "eq" as FilterOp, value: [...set][0] })),
+      activeFacets.length > 0
+        ? `（${activeFacets
+            .map(([col, set]) => `${fieldLabel(col)}=${[...set].join("/")}`)
+            .join("，")}）`
+        : "",
     [activeFacets]
   )
-  const skippedMultiFacets = activeFacets.filter(([, set]) => set.size > 1)
+
+  // Candidate dimensions for the distribution view: string dimensions, minus the
+  // primary key (high-cardinality / not meaningful to group on).
+  const distAttrs = React.useMemo(
+    () => lensColumns.filter((c) => c.kind === "dimension" && c.name !== pkCol),
+    [lensColumns, pkCol]
+  )
+  // Traversable links from this type, for the "search around" menu.
+  const directions = React.useMemo(
+    () => pivotDirections(links, focus.id),
+    [links, focus.id]
+  )
 
   // Timeline lens: newest-first detail slice over the full set via the analysis
   // service (ordered server-side by the time property).
@@ -411,10 +513,81 @@ function InstanceList({
     }
   }, [view, focus.api_name, geoCol, lensFilters])
 
+  // Effective distribution dimension: the user's choice when still valid for this
+  // type, else the first candidate. Computed (not stored) so switching types needs
+  // no reconciling effect.
+  const activeDistAttr = distAttrs.some((c) => c.name === distAttr)
+    ? distAttr
+    : distAttrs[0]?.name ?? ""
+
+  // Distribution view: count objects grouped by the chosen dimension (top N),
+  // over the full set via the analysis service. Uses lensFilters so facet
+  // selections and any pivot-derived `in` filter both apply.
+  React.useEffect(() => {
+    if (view !== "distribution" || !activeDistAttr) return
+    let cancelled = false
+    setLensLoading(true)
+    setLensError(null)
+    analysisApi
+      .analyze({
+        table: focus.api_name,
+        group_by: activeDistAttr,
+        metrics: [{ field: pkCol, agg: "count" }],
+        filters: lensFilters,
+        limit: DISTRIBUTION_TOP,
+      })
+      .then((r) => {
+        if (cancelled) return
+        setDistRows(
+          r.rows.map((row) => ({ group: String(row.group ?? ""), value: Number(row.m0 ?? 0) }))
+        )
+        setLensMatched(r.matched_rows)
+      })
+      .catch(() => {
+        if (!cancelled) setLensError("分析服务未启动或查询失败")
+      })
+      .finally(() => {
+        if (!cancelled) setLensLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [view, focus.api_name, activeDistAttr, pkCol, lensFilters])
+
+  // Run a set-level "search around": collect the current set's join keys and pivot
+  // the whole set to the peer type via an `in` filter.
+  async function runPivot(dir: PivotDirection) {
+    const target = nodeMap.get(dir.targetTypeId)
+    if (!target || pivotBusy) return
+    setPivotBusy(true)
+    setPivotError(null)
+    try {
+      const { keys, overLimit } = await collectPivotKeys(focus.api_name, dir.sourceKeyColumn, lensFilters)
+      if (overLimit) {
+        setPivotError(`对象集过大（${keys.length}+ 个键），请先筛选后再跳转`)
+        return
+      }
+      if (keys.length === 0) {
+        setPivotError("当前对象集为空或无有效关联键")
+        return
+      }
+      const sourceDesc = derived ? derived.chainText : `${focus.display_name}${facetSummary}`
+      const chainText = `${sourceDesc} → 沿『${dir.link.display_name}』→ ${target.display_name}`
+      setPivotMenuOpen(false)
+      onPivot(dir.targetTypeId, pivotInFilter(dir.targetColumn, keys), chainText)
+    } catch {
+      setPivotError("跳转失败：分析服务未启动或查询出错")
+    } finally {
+      setPivotBusy(false)
+    }
+  }
+
   // Map point drill-in: pin the clicked value as the geo facet's sole selection
   // and switch back to the list to show those instances.
   function drillGeo(value: string) {
     if (!geoCol) return
+    // Same as toggleFacet: the set changes, so drop any stale pivot notice.
+    setPivotError(null)
     setSelected((prev) => ({ ...prev, [geoCol.name]: new Set([value]) }))
     setView("list")
   }
@@ -441,6 +614,9 @@ function InstanceList({
   const paged = filtered.slice((page - 1) * INSTANCE_PAGE_SIZE, page * INSTANCE_PAGE_SIZE)
 
   function toggleFacet(col: string, value: string) {
+    // Facet changes redefine the current object set, so a stale pivot over-limit
+    // notice (computed against the previous set) must not linger.
+    setPivotError(null)
     setSelected((prev) => {
       const next = { ...prev }
       const set = new Set(next[col] ?? [])
@@ -460,6 +636,13 @@ function InstanceList({
           {(
             [
               { key: "list", label: "列表", Icon: TableIcon, enabled: true, hint: "" },
+              {
+                key: "distribution",
+                label: "分布",
+                Icon: BarChart3Icon,
+                enabled: distAttrs.length > 0,
+                hint: "当前对象类型无可用维度",
+              },
               {
                 key: "timeline",
                 label: "时间轴",
@@ -495,7 +678,24 @@ function InstanceList({
         </div>
       </div>
 
-      {/* Toolbar: search (list only) + active facet chips + count / lens note. */}
+      {/* Derived-set chain chip: the "search around" trail that produced this set. */}
+      {derived && (
+        <div className="flex items-center gap-2 border-b border-border bg-emerald-500/5 px-3 py-2">
+          <RouteIcon className="size-4 shrink-0 text-emerald-500" />
+          <span className="min-w-0 flex-1 truncate text-xs text-emerald-700 dark:text-emerald-300">
+            {derived.chainText}
+            <span className="ml-1 font-medium">· {derivedMatched.toLocaleString()} 条</span>
+          </span>
+          <button
+            onClick={onClearDerived}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-500/40 px-1.5 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+          >
+            清除 <XIcon className="size-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Toolbar: search (list only) + search-around + facet chips + count. */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
         {view === "list" && (
           <div className="relative w-full max-w-xs">
@@ -508,6 +708,57 @@ function InstanceList({
             />
           </div>
         )}
+
+        {/* Search Around: pivot the whole current set to a related type. */}
+        {directions.length > 0 && (
+          <div className="relative">
+            <button
+              onClick={() => setPivotMenuOpen((o) => !o)}
+              disabled={pivotBusy}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+            >
+              {pivotBusy ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : (
+                <Share2Icon className="size-4" />
+              )}
+              沿关系跳转
+            </button>
+            {pivotMenuOpen && (
+              <>
+                {/* Click-away backdrop. */}
+                <button
+                  className="fixed inset-0 z-10 cursor-default"
+                  aria-hidden
+                  onClick={() => setPivotMenuOpen(false)}
+                />
+                <div className="absolute left-0 z-20 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+                  <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+                    将当前对象集沿关系跳转到
+                  </div>
+                  <div className="max-h-64 overflow-auto py-1">
+                    {directions.map((d) => {
+                      const target = nodeMap.get(d.targetTypeId)
+                      return (
+                        <button
+                          key={`${d.link.id}:${d.reverse}`}
+                          onClick={() => runPivot(d)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
+                        >
+                          <ChevronRightIcon className="size-3.5 shrink-0 text-emerald-500" />
+                          <span className="min-w-0 truncate">
+                            沿『{d.link.display_name}』→ {target?.display_name ?? d.targetTypeId}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Active facet filters as removable chips (shown across all views). */}
         {activeFacets.flatMap(([col, set]) =>
           [...set].map((value) => (
@@ -522,16 +773,14 @@ function InstanceList({
             </button>
           ))
         )}
-        {/* Multi-select facets can't map to the lens filter contract — say so. */}
-        {view !== "list" && skippedMultiFacets.length > 0 && (
-          <span className="text-xs text-amber-600 dark:text-amber-400">
-            多选分面未应用于此视图：
-            {skippedMultiFacets.map(([col]) => fieldLabel(col)).join("、")}
-          </span>
+        {pivotError && (
+          <span className="text-xs text-amber-600 dark:text-amber-400">{pivotError}</span>
         )}
         <span className="ml-auto text-xs text-muted-foreground">
           {view === "list"
-            ? `${filtered.length} 个对象`
+            ? derived
+              ? `${filtered.length} 行样本 · 共 ${derivedMatched.toLocaleString()} 条`
+              : `${filtered.length} 个对象`
             : `共 ${lensMatched.toLocaleString()} 条（全量）`}
         </span>
       </div>
@@ -657,7 +906,46 @@ function InstanceList({
         // Lens body: timeline / map, fed by the analysis service over the full
         // object set (filtered by the mapped facet selections).
         <div className="min-h-0 flex-1 overflow-hidden">
-          {lensError ? (
+          {view === "distribution" ? (
+            <div className="flex h-full flex-col">
+              {/* Dimension picker + total. */}
+              <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+                <span className="text-xs text-muted-foreground">按维度</span>
+                <select
+                  value={activeDistAttr}
+                  onChange={(e) => setDistAttr(e.target.value)}
+                  className="rounded-md border border-border bg-transparent px-2 py-1 text-sm outline-none focus:border-emerald-500/60"
+                >
+                  {distAttrs.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  共 {lensMatched.toLocaleString()} 条
+                </span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto p-4">
+                {lensError ? (
+                  <div className="py-10 text-center text-sm text-red-500">{lensError}</div>
+                ) : lensLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                    <Loader2Icon className="size-4 animate-spin" /> 加载分布…
+                  </div>
+                ) : distRows.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">暂无数据</div>
+                ) : (
+                  <MetricBarChart
+                    title={`按${fieldLabel(activeDistAttr)}分布（Top ${DISTRIBUTION_TOP}）`}
+                    unit=""
+                    agg="count"
+                    rows={distRows}
+                  />
+                )}
+              </div>
+            </div>
+          ) : lensError ? (
             <div className="py-10 text-center text-sm text-red-500">{lensError}</div>
           ) : lensLoading ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">

@@ -74,6 +74,21 @@ export type CreateLink = {
   cardinality: string
 }
 
+// Full link-type metadata (from GET /link-types). Unlike GraphLink (edge list on
+// /graph), this carries the join columns (from_property / to_property) needed to
+// compile a set-level "search around" pivot into an `in` filter on the peer type.
+export type LinkType = {
+  id: string
+  api_name: string
+  display_name: string
+  from_object_type_id: string
+  to_object_type_id: string
+  from_property: string
+  to_property: string
+  cardinality: string
+  created_at: string
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
   const res = await fetch(`${ONTOLOGY_API}${path}`, {
@@ -90,6 +105,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const ontologyApi = {
   graph: () => req<OntologyGraph>("/graph"),
+  linkTypes: () => req<LinkType[]>("/link-types"),
   objectType: (id: string) => req<ObjectTypeDetail>(`/object-types/${id}`),
   createObjectType: (p: CreateObjectType) =>
     req<ObjectTypeDetail>("/object-types", { method: "POST", body: JSON.stringify(p) }),

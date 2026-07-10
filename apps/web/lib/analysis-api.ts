@@ -28,12 +28,13 @@ export type MetricSpec = {
   agg: MetricAgg
 }
 
-export type FilterOp = "eq" | "neq" | "gt" | "lt" | "contains"
+export type FilterOp = "eq" | "neq" | "gt" | "lt" | "contains" | "in"
 
 export type FilterSpec = {
   field: string
   op: FilterOp
-  value: string
+  // Scalar for eq/neq/gt/lt/contains; a list of candidate values for "in".
+  value: string | string[]
 }
 
 export type AnalyzeRequest = {
@@ -41,6 +42,8 @@ export type AnalyzeRequest = {
   group_by: string | null
   metrics: MetricSpec[]
   filters: FilterSpec[]
+  // Aggregate mode: cap on the number of groups returned (default 50 server-side).
+  limit?: number
   // Detail-mode pagination + sorting; ignored by the service in aggregate mode.
   page?: number
   page_size?: number

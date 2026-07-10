@@ -16,6 +16,12 @@ def _matches(row: dict, f: FilterSpec) -> bool:
         return str(value) == str(f.value)
     if f.op == "neq":
         return str(value) != str(f.value)
+    if f.op == "in":
+        # Membership test with the same string tolerance as eq: the source value
+        # may be an int while the caller sends strings (or vice versa). A scalar
+        # value is treated as a one-element set for convenience.
+        candidates = f.value if isinstance(f.value, (list, tuple, set)) else [f.value]
+        return str(value) in {str(v) for v in candidates}
     if f.op == "contains":
         return str(f.value) in str(value)
     try:

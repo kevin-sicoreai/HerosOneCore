@@ -27,7 +27,9 @@ class MetricSpec(BaseModel):
 
 class FilterSpec(BaseModel):
     field: str
-    op: Literal["eq", "neq", "gt", "lt", "contains"] = "eq"
+    op: Literal["eq", "neq", "gt", "lt", "contains", "in"] = "eq"
+    # "in" carries a list of candidate values; the other ops carry a scalar. The
+    # type stays permissive (Any) so a list is accepted alongside str/number.
     value: Any
 
 

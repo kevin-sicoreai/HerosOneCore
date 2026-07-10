@@ -5,6 +5,7 @@ import {
   BarChart3Icon,
   CalendarClockIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   ChevronsUpDownIcon,
   ChevronUpIcon,
   FilterIcon,
@@ -14,6 +15,8 @@ import {
   PlusIcon,
   RadarIcon,
   RefreshCwIcon,
+  RouteIcon,
+  Share2Icon,
   TableIcon,
   WifiOffIcon,
   XIcon,
@@ -31,8 +34,17 @@ import {
   type MetricQueryResult,
   type MetricSpec,
 } from "@/lib/analysis-api"
+import { ontologyApi, type GraphNode, type LinkType } from "@/lib/ontology-api"
+import {
+  collectPivotKeys,
+  pivotDirections,
+  pivotInFilter,
+  type PivotDirection,
+} from "@/lib/object-set"
+import { fieldLabel } from "@/lib/field-labels"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { MapView, TimelineView } from "@/components/object-lenses"
+import { MetricBarChart } from "@/components/metric-bar-chart"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Pagination } from "@/components/ui/pagination"
@@ -100,8 +112,42 @@ function formatMetricValue(value: number, agg: string, unit: string): string {
   return s
 }
 
+// One pivot hop in the analysis path: the object set was pinned to peer type
+// `targetTable` by `inFilter`, following link `linkLabel`. `matched` is the peer
+// row count (for the breadcrumb). The active query table after this hop is
+// `targetTable`; the last step's `inFilter` is the derived filter on every query.
+type PathStep = {
+  linkLabel: string
+  targetTable: string
+  targetLabel: string
+  inFilter: FilterSpec
+  matched: number
+}
+
+// Human label for the current lens, shown as the trailing breadcrumb segment.
+const LENS_STEP_LABEL: Record<Lens, string> = {
+  dashboard: "看板",
+  table: "表格",
+  chart: "图表",
+  timeline: "时间轴",
+  map: "地图",
+}
+
 export default function AnalysisPage() {
   const [tables, setTables] = React.useState<AnalysisTable[]>([])
+  // Ontology metadata for set-level pivots: node list (api_name <-> id/label) and
+  // full link types (join columns). Loaded once; failures degrade to no pivots.
+  const [nodes, setNodes] = React.useState<GraphNode[]>([])
+  const [linkTypes, setLinkTypes] = React.useState<LinkType[]>([])
+  // The analysis path: each entry a pivot hop. Empty = plain (user-selected) table.
+  const [pathSteps, setPathSteps] = React.useState<PathStep[]>([])
+  // The origin table + count, captured when the first pivot happens.
+  const [origin, setOrigin] = React.useState<{ table: string; label: string; count: number } | null>(
+    null
+  )
+  const [pivotMenuOpen, setPivotMenuOpen] = React.useState(false)
+  const [pivotBusy, setPivotBusy] = React.useState(false)
+  const [pivotError, setPivotError] = React.useState<string | null>(null)
   const [allMetrics, setAllMetrics] = React.useState<Metric[]>([])
   const [offline, setOffline] = React.useState(false)
   const [tableName, setTableName] = React.useState<string>("")
@@ -138,6 +184,36 @@ export default function AnalysisPage() {
   const dimensions = table?.columns.filter((c) => c.kind === "dimension" && c.name !== "id") ?? []
   const measures = table?.columns.filter((c) => c.kind === "measure") ?? []
 
+  // --- Analysis-path (pivot) derivations. ---
+  const pivotActive = pathSteps.length > 0
+  // The derived `in` filter attached to every query while a pivot is active.
+  const derivedFilter = pivotActive ? pathSteps[pathSteps.length - 1].inFilter : null
+  // Non-empty user filters, then the derived filter — the filter list every
+  // /analyze lens sends. A pivot flows through unchanged.
+  const cleanUserFilters = React.useMemo(
+    () => filters.filter((f) => String(f.value).toString().trim() !== ""),
+    [filters]
+  )
+  const queryFilters = React.useMemo<FilterSpec[]>(
+    () => [...cleanUserFilters, ...(derivedFilter ? [derivedFilter] : [])],
+    [cleanUserFilters, derivedFilter]
+  )
+  const nodeByApi = React.useMemo(() => {
+    const m = new Map<string, GraphNode>()
+    for (const n of nodes) m.set(n.api_name, n)
+    return m
+  }, [nodes])
+  const nodeById = React.useMemo(() => {
+    const m = new Map<string, GraphNode>()
+    for (const n of nodes) m.set(n.id, n)
+    return m
+  }, [nodes])
+  // Traversable links from the current query table, for the "search around" menu.
+  const directions = React.useMemo(() => {
+    const baseId = nodeByApi.get(tableName)?.id
+    return baseId ? pivotDirections(linkTypes, baseId) : []
+  }, [linkTypes, nodeByApi, tableName])
+
   // Capability detection on the current object type's columns / metrics.
   const timeCol =
     table?.columns.find((c) => c.data_type && /^(DATE|TIMESTAMP)/i.test(c.data_type)) ?? null
@@ -161,9 +237,11 @@ export default function AnalysisPage() {
           : l === "map"
             ? !!geoCol
             : l === "chart"
-              ? chartMetrics.length > 0
+              ? // Chart is available when the type has cube metrics, or when a
+                // pivot is active (it then renders via an /analyze aggregate).
+                chartMetrics.length > 0 || pivotActive
               : true,
-    [allMetrics, timeCol, geoCol, chartMetrics]
+    [allMetrics, timeCol, geoCol, chartMetrics, pivotActive]
   )
 
   // Load the catalog + metric definitions, select the first table.
@@ -179,11 +257,23 @@ export default function AnalysisPage() {
       .metrics()
       .then(setAllMetrics)
       .catch(() => setOffline(true))
+    // Ontology metadata drives set-level pivots; failure just disables them.
+    Promise.all([ontologyApi.graph(), ontologyApi.linkTypes().catch(() => [])])
+      .then(([g, lts]) => {
+        setNodes(g.nodes)
+        setLinkTypes(lts)
+      })
+      .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function selectTable(t: AnalysisTable) {
     setTableName(t.name)
+    // Selecting a base type from the rail starts a fresh path (drops any pivots).
+    setPathSteps([])
+    setOrigin(null)
+    setPivotError(null)
+    setPivotMenuOpen(false)
     // Default to detail mode: no grouping, no measure — show all rows as-is.
     setGroupBy("")
     setMetrics([])
@@ -233,7 +323,7 @@ export default function AnalysisPage() {
           table: tableName,
           group_by: metrics.length === 0 ? null : groupBy || null,
           metrics,
-          filters: filters.filter((f) => String(f.value).trim() !== ""),
+          filters: queryFilters,
           page,
           page_size: DETAIL_PAGE_SIZE,
           // Sorting only applies to detail mode; the service ignores it when
@@ -246,7 +336,7 @@ export default function AnalysisPage() {
         .finally(() => setLoading(false))
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [tableName, groupBy, metrics, filters, page, orderBy, orderDir])
+  }, [tableName, groupBy, metrics, queryFilters, page, orderBy, orderDir])
 
   // Timeline lens: pull only the newest TIMELINE_LIMIT records, ordered by the
   // time property server-side — no full-set download.
@@ -261,7 +351,7 @@ export default function AnalysisPage() {
           table: tableName,
           group_by: null,
           metrics: [],
-          filters: filters.filter((f) => String(f.value).trim() !== ""),
+          filters: queryFilters,
           page: 1,
           page_size: TIMELINE_LIMIT,
           order_by: timeCol.name,
@@ -271,7 +361,7 @@ export default function AnalysisPage() {
         .catch(() => setOffline(true))
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [lens, tableName, filters, timeCol])
+  }, [lens, tableName, queryFilters, timeCol])
 
   // Map lens: server-side count-per-geo aggregate (small payload) instead of
   // counting a full detail set on the client.
@@ -286,7 +376,7 @@ export default function AnalysisPage() {
           table: tableName,
           group_by: geoCol.name,
           metrics: [{ field: geoCol.name, agg: "count" }],
-          filters: filters.filter((f) => String(f.value).trim() !== ""),
+          filters: queryFilters,
         })
         .then((r) =>
           setGeoCounts(
@@ -299,11 +389,13 @@ export default function AnalysisPage() {
         .catch(() => setOffline(true))
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [lens, tableName, filters, geoCol])
+  }, [lens, tableName, queryFilters, geoCol])
 
-  // Chart lens: query the selected cube metric (debounced) on any change.
+  // Chart lens (cube metrics): query the selected metric (debounced). Skipped
+  // while a pivot is active — the cube path can't express the derived `in`
+  // filter, so the chart then renders from the /analyze aggregate (`result`).
   React.useEffect(() => {
-    if (lens !== "chart" || !chartMetricKey) {
+    if (lens !== "chart" || !chartMetricKey || pivotActive) {
       setMetricResult(null)
       return
     }
@@ -312,13 +404,13 @@ export default function AnalysisPage() {
         .queryMetric({
           metric: chartMetricKey,
           dimension: chartDimKey || null,
-          filters: filters.filter((f) => String(f.value).trim() !== ""),
+          filters: cleanUserFilters,
         })
         .then(setMetricResult)
         .catch(() => setOffline(true))
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [lens, chartMetricKey, chartDimKey, filters])
+  }, [lens, chartMetricKey, chartDimKey, cleanUserFilters, pivotActive])
 
   // Dashboard lens: fan out one overall query per metric (plus a first-dimension
   // breakdown when the metric has dimensions) and gather them with Promise.all.
@@ -358,6 +450,93 @@ export default function AnalysisPage() {
     loadDashboard()
   }, [lens, dashData, loadDashboard])
 
+  // Reset user config when the query table changes via a pivot / backtrack (the
+  // path itself is managed by the caller). Mirrors selectTable minus the path reset.
+  function resetUserConfig() {
+    setGroupBy("")
+    setMetrics([])
+    setFilters([])
+    setResult(null)
+    setOrderBy(null)
+    setOrderDir("asc")
+    setChartMetricKey("")
+    setChartDimKey("")
+    setMetricResult(null)
+  }
+
+  // Run a set-level "search around": collect the current set's join keys and pivot
+  // the whole set (user filters + any active derived filter) to the peer type.
+  async function runPivot(dir: PivotDirection) {
+    const target = nodeById.get(dir.targetTypeId)
+    if (!target || pivotBusy) return
+    setPivotBusy(true)
+    setPivotError(null)
+    try {
+      const { keys, overLimit } = await collectPivotKeys(tableName, dir.sourceKeyColumn, queryFilters)
+      if (overLimit) {
+        setPivotError(`对象集过大（${keys.length}+ 个键），请先筛选后再跳转`)
+        return
+      }
+      if (keys.length === 0) {
+        setPivotError("当前对象集为空或无有效关联键")
+        return
+      }
+      const inFilter = pivotInFilter(dir.targetColumn, keys)
+      // Peer-set count for the breadcrumb (cheap detail probe, page_size 1).
+      const matched = await analysisApi
+        .analyze({
+          table: target.api_name,
+          group_by: null,
+          metrics: [],
+          filters: [inFilter],
+          page: 1,
+          page_size: 1,
+        })
+        .then((r) => r.matched_rows)
+        .catch(() => 0)
+      // Capture the origin on the first pivot (before the table switches).
+      setOrigin(
+        (o) => o ?? { table: tableName, label: table?.label ?? tableName, count: table?.row_count ?? 0 }
+      )
+      setPathSteps((s) => [
+        ...s,
+        {
+          linkLabel: dir.link.display_name,
+          targetTable: target.api_name,
+          targetLabel: target.display_name,
+          inFilter,
+          matched,
+        },
+      ])
+      setTableName(target.api_name)
+      resetUserConfig()
+      setPivotMenuOpen(false)
+    } catch {
+      setPivotError("跳转失败：分析服务未启动或查询出错")
+    } finally {
+      setPivotBusy(false)
+    }
+  }
+
+  // Breadcrumb backtrack: to the origin (drop all pivots) or to a given step
+  // (drop later pivots). User config is reset to that step's state.
+  function goToOrigin() {
+    if (!origin) return
+    setTableName(origin.table)
+    setPathSteps([])
+    setOrigin(null)
+    setPivotError(null)
+    resetUserConfig()
+  }
+  function goToStep(i: number) {
+    const step = pathSteps[i]
+    if (!step) return
+    setPathSteps((s) => s.slice(0, i + 1))
+    setTableName(step.targetTable)
+    setPivotError(null)
+    resetUserConfig()
+  }
+
   // Drill from the map into the detail table filtered to one geo value.
   function drillGeo(value: string) {
     if (!geoCol) return
@@ -387,6 +566,14 @@ export default function AnalysisPage() {
     setFilters((f) => [...f, { field: col.name, op: "eq", value: "" }])
   }
 
+  // Breadcrumb helpers: a short summary of the current user filters.
+  const opSymbol = (op: FilterOp) => OP_OPTIONS.find((o) => o.value === op)?.label ?? op
+  const filterSummary = cleanUserFilters
+    .map((f) => `${fieldLabel(f.field)}${opSymbol(f.op)}${Array.isArray(f.value) ? f.value.join("/") : f.value}`)
+    .join("，")
+  // Show the analysis-path breadcrumb on every set-scoped lens (not the global board).
+  const showPath = !!table && lens !== "dashboard"
+
   return (
     <PageContainer className="h-full">
       <PageHeading
@@ -403,6 +590,60 @@ export default function AnalysisPage() {
           )
         }
       />
+
+      {/* Analysis path breadcrumb: the traceable trail from the origin object set
+          through any pivots to the current lens. Segments are clickable to
+          backtrack (dropping later pivots). */}
+      {showPath && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs">
+          <RouteIcon className="size-3.5 shrink-0 text-emerald-500" />
+          <span className="shrink-0 text-muted-foreground">分析路径</span>
+          <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+          <button
+            onClick={goToOrigin}
+            disabled={!pivotActive}
+            className={`shrink-0 rounded px-1 py-0.5 ${
+              pivotActive
+                ? "text-muted-foreground hover:text-foreground"
+                : "font-medium text-foreground"
+            }`}
+          >
+            起始：{pivotActive ? origin?.label : table?.label}(
+            {(pivotActive ? origin?.count ?? 0 : table?.row_count ?? 0).toLocaleString()})
+          </button>
+          {!pivotActive && cleanUserFilters.length > 0 && (
+            <>
+              <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+              <span className="text-emerald-600 dark:text-emerald-400">
+                筛选：{filterSummary}({(result?.matched_rows ?? 0).toLocaleString()})
+              </span>
+            </>
+          )}
+          {pathSteps.map((s, i) => (
+            <React.Fragment key={`${s.targetTable}:${i}`}>
+              <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+              <button
+                onClick={() => goToStep(i)}
+                className={`rounded px-1 py-0.5 ${
+                  i === pathSteps.length - 1
+                    ? "font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                沿『{s.linkLabel}』→ {s.targetLabel}({s.matched.toLocaleString()})
+              </button>
+            </React.Fragment>
+          ))}
+          {pivotActive && cleanUserFilters.length > 0 && (
+            <>
+              <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+              <span className="text-emerald-600 dark:text-emerald-400">筛选：{filterSummary}</span>
+            </>
+          )}
+          <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+          <span className="shrink-0 font-medium text-foreground">{LENS_STEP_LABEL[lens]}</span>
+        </div>
+      )}
 
       {/* Contour/Quiver-style split: a control rail on the left, the data canvas
           on the right. Narrow screens collapse the grid to a single column so the
@@ -493,7 +734,9 @@ export default function AnalysisPage() {
                       </select>
                       <Input
                         className="h-8 min-w-0 flex-1"
-                        value={f.value}
+                        // User-entered filters are always scalar; arrays only ever
+                        // arrive as the (hidden) pivot-derived `in` filter.
+                        value={typeof f.value === "string" ? f.value : f.value.join(",")}
                         placeholder="值"
                         onChange={(e) =>
                           setFilters((all) => all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
@@ -511,11 +754,65 @@ export default function AnalysisPage() {
                 ))}
               </div>
             )}
+
+            {/* Search Around: pivot the whole current object set to a related type. */}
+            {directions.length > 0 && (
+              <div className="relative mt-3 border-t border-border/60 pt-3">
+                <button
+                  onClick={() => setPivotMenuOpen((o) => !o)}
+                  disabled={pivotBusy || !table}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+                >
+                  {pivotBusy ? (
+                    <Loader2Icon className="size-4 animate-spin" />
+                  ) : (
+                    <Share2Icon className="size-4" />
+                  )}
+                  沿关系跳转
+                </button>
+                {pivotMenuOpen && (
+                  <>
+                    <button
+                      className="fixed inset-0 z-10 cursor-default"
+                      aria-hidden
+                      onClick={() => setPivotMenuOpen(false)}
+                    />
+                    <div className="absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+                      <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+                        将当前对象集跳转到
+                      </div>
+                      <div className="max-h-64 overflow-auto py-1">
+                        {directions.map((d) => {
+                          const target = nodeById.get(d.targetTypeId)
+                          return (
+                            <button
+                              key={`${d.link.id}:${d.reverse}`}
+                              onClick={() => runPivot(d)}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
+                            >
+                              <ChevronRightIcon className="size-3.5 shrink-0 text-emerald-500" />
+                              <span className="min-w-0 truncate">
+                                沿『{d.link.display_name}』→ {target?.display_name ?? d.targetTypeId}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+                {pivotError && (
+                  <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{pivotError}</div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Lens-specific controls (table group-by/measures, chart metric/dimension).
-              Timeline/map need no extra controls, so this section is simply absent. */}
-          {lens === "table" && (
+              Timeline/map need no extra controls, so this section is simply absent.
+              Under a pivot the chart lens routes through /analyze, so it reuses the
+              table group-by/measure controls instead of the cube metric pickers. */}
+          {(lens === "table" || (lens === "chart" && pivotActive)) && (
             <TableControls
               dimensions={dimensions}
               measures={measures}
@@ -525,7 +822,7 @@ export default function AnalysisPage() {
               setMetrics={setMetrics}
             />
           )}
-          {lens === "chart" && chartMetrics.length > 0 && (
+          {lens === "chart" && !pivotActive && chartMetrics.length > 0 && (
             <ChartControls
               chartMetrics={chartMetrics}
               chartMetric={chartMetric}
@@ -585,7 +882,10 @@ export default function AnalysisPage() {
 
           {/* Compact stat strip — the former big stat cards, squeezed to one line. */}
           {lens === "table" && <TableStatStrip result={result} />}
-          {lens === "chart" && chartMetrics.length > 0 && (
+          {/* Under a pivot the chart reads the /analyze aggregate, so it reuses the
+              table stat strip; otherwise it shows the cube-metric strip. */}
+          {lens === "chart" && pivotActive && <TableStatStrip result={result} />}
+          {lens === "chart" && !pivotActive && chartMetrics.length > 0 && (
             <ChartStatStrip metricResult={metricResult} />
           )}
 
@@ -641,9 +941,12 @@ export default function AnalysisPage() {
             </div>
           )}
 
-          {lens === "chart" && (
-            <ChartCanvas chartMetrics={chartMetrics} metricResult={metricResult} offline={offline} />
-          )}
+          {lens === "chart" &&
+            (pivotActive ? (
+              <PivotChartCanvas result={result} offline={offline} />
+            ) : (
+              <ChartCanvas chartMetrics={chartMetrics} metricResult={metricResult} offline={offline} />
+            ))}
 
           {lens === "timeline" && (
             <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
@@ -1056,6 +1359,41 @@ function ChartCanvas({
             )
           })}
         </div>
+      )}
+    </div>
+  )
+}
+
+// Chart canvas under an active pivot: the cube-metric path can't carry the
+// derived `in` filter, so the chart is rendered from the /analyze aggregate
+// result. Requires an aggregate configuration (a measure, optionally grouped);
+// otherwise it prompts the user to pick a group-by + measure.
+function PivotChartCanvas({
+  result,
+  offline,
+}: {
+  result: AnalyzeResult | null
+  offline: boolean
+}) {
+  if (!result || result.mode !== "aggregate") {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
+        {offline ? "分析服务未启动" : "在左侧选择分组维度与度量以查看图表"}
+      </div>
+    )
+  }
+  const rows = result.rows.map((r) => ({ group: String(r.group ?? ""), value: Number(r.m0 ?? 0) }))
+  // columns[0] = group label, columns[1] = first metric label.
+  const title =
+    result.columns.length > 1 ? `${result.columns[1]} · 按${result.columns[0]}` : result.columns[0]
+  return (
+    <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card p-4">
+      {rows.length === 0 ? (
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          当前配置无数据
+        </div>
+      ) : (
+        <MetricBarChart title={title} unit="" agg="" rows={rows} />
       )}
     </div>
   )
