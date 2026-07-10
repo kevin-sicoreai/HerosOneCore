@@ -1,0 +1,40 @@
+# Generated from ontology object type 'performance_review'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: performance_review
+    sql: SELECT * FROM read_parquet('/data/raw/performance_reviews.parquet')
+
+    joins:
+      - name: employee
+        sql: "{CUBE}.employee_id = {employee}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: employee_id
+        sql: employee_id
+        type: number
+      - name: cycle
+        sql: cycle
+        type: string
+      - name: department_name
+        sql: department_name
+        type: string
+      - name: reviewer_id
+        sql: reviewer_id
+        type: number
+      - name: created_at
+        sql: created_at
+        type: time
+
+    measures:
+      - name: hr_perf_score
+        title: 平均绩效分
+        type: avg
+        sql: score
+      - name: hr_perf_score_matched
+        title: 平均绩效分·命中行数
+        type: count

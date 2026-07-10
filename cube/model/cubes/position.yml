@@ -1,0 +1,28 @@
+# Generated from ontology object type 'position'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: position
+    sql: SELECT * FROM read_parquet('/data/raw/positions.parquet')
+
+    joins:
+      - name: department
+        sql: "{CUBE}.department_id = {department}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: title
+        sql: title
+        type: string
+      - name: level
+        sql: level
+        type: string
+      - name: department_id
+        sql: department_id
+        type: number
+      - name: created_at
+        sql: created_at
+        type: time

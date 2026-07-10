@@ -59,24 +59,19 @@ export const APP_LAYERS: AppLayer[] = [
     ],
   },
   {
+    // Analytics over the same object universe, two postures: aggregate
+    // metrics (Contour-style) and per-object exploration (Object Explorer /
+    // Quiver-style). Engines stay headless behind the platform's own pages.
     key: "analytics",
     label: "分析洞察",
     apps: [
       {
-        // Native metrics workbench (headless principle: engines stay behind
-        // the platform's own pages — no third-party UI embedded or linked).
         key: "analysis",
         title: "指标与看板",
         href: "/analysis",
         icon: LayoutDashboardIcon,
         desc: "看板 · 指标图表 · 聚合与明细分析",
       },
-    ],
-  },
-  {
-    key: "explore",
-    label: "对象探索",
-    apps: [
       {
         key: "explorer",
         title: "对象浏览器",

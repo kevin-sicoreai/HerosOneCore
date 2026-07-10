@@ -1,0 +1,32 @@
+# Generated from ontology object type 'department'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: department
+    sql: SELECT * FROM read_parquet('/data/raw/departments.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: city
+        sql: city
+        type: string
+      - name: headcount_plan
+        sql: headcount_plan
+        type: number
+      - name: created_at
+        sql: created_at
+        type: time
+
+    measures:
+      - name: hr_headcount_plan
+        title: 编制人数
+        type: sum
+        sql: headcount_plan
+      - name: hr_headcount_plan_matched
+        title: 编制人数·命中行数
+        type: count

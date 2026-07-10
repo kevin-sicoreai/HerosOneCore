@@ -1,0 +1,79 @@
+# Generated from ontology object type 'employee'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: employee
+    sql: SELECT * FROM read_parquet('/data/raw/employees.parquet')
+
+    joins:
+      - name: position
+        sql: "{CUBE}.position_id = {position}.id"
+        relationship: many_to_one
+      - name: department
+        sql: "{CUBE}.department_id = {department}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: gender
+        sql: gender
+        type: string
+      - name: age
+        sql: age
+        type: number
+      - name: department_id
+        sql: department_id
+        type: number
+      - name: position_id
+        sql: position_id
+        type: number
+      - name: status
+        sql: status
+        type: string
+      - name: hire_date
+        sql: hire_date
+        type: time
+      - name: term_date
+        sql: term_date
+        type: time
+      - name: city
+        sql: city
+        type: string
+      - name: email
+        sql: email
+        type: string
+
+    measures:
+      - name: hr_headcount
+        title: 在编人数
+        type: count
+        filters:
+          - sql: "{CUBE}.status = '在职'"
+      - name: hr_headcount_matched
+        title: 在编人数·命中行数
+        type: count
+        filters:
+          - sql: "{CUBE}.status = '在职'"
+      - name: hr_attrition_rate
+        title: 离职率
+        type: number
+        sql: "ROUND(100.0 * COUNT(*) FILTER (WHERE {CUBE}.status = '离职') / COUNT(*), 1)"
+      - name: hr_attrition_rate_matched
+        title: 离职率·命中行数
+        type: count
+      - name: hr_avg_salary
+        title: 人均月薪
+        type: avg
+        sql: monthly_salary
+        filters:
+          - sql: "{CUBE}.status = '在职'"
+      - name: hr_avg_salary_matched
+        title: 人均月薪·命中行数
+        type: count
+        filters:
+          - sql: "{CUBE}.status = '在职'"

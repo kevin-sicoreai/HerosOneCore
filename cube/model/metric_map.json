@@ -1,0 +1,66 @@
+{
+  "hr_headcount": {
+    "base_cube": "employee",
+    "measure": "employee.hr_headcount",
+    "matched_measure": "employee.hr_headcount_matched",
+    "dimensions": {
+      "dept_name": "department.name",
+      "city": "employee.city",
+      "position_level": "position.level"
+    }
+  },
+  "hr_attrition_rate": {
+    "base_cube": "employee",
+    "measure": "employee.hr_attrition_rate",
+    "matched_measure": "employee.hr_attrition_rate_matched",
+    "dimensions": {
+      "dept_name": "department.name",
+      "city": "employee.city"
+    }
+  },
+  "hr_avg_salary": {
+    "base_cube": "employee",
+    "measure": "employee.hr_avg_salary",
+    "matched_measure": "employee.hr_avg_salary_matched",
+    "dimensions": {
+      "dept_name": "department.name",
+      "city": "employee.city",
+      "position_level": "position.level"
+    }
+  },
+  "hr_headcount_plan": {
+    "base_cube": "department",
+    "measure": "department.hr_headcount_plan",
+    "matched_measure": "department.hr_headcount_plan_matched",
+    "dimensions": {
+      "city": "department.city",
+      "dept_name": "department.name"
+    }
+  },
+  "hr_perf_score": {
+    "base_cube": "performance_review",
+    "measure": "performance_review.hr_perf_score",
+    "matched_measure": "performance_review.hr_perf_score_matched",
+    "dimensions": {
+      "cycle": "performance_review.cycle",
+      "department_name": "performance_review.department_name"
+    }
+  },
+  "hr_application_count": {
+    "base_cube": "application",
+    "measure": "application.hr_application_count",
+    "matched_measure": "application.hr_application_count_matched",
+    "dimensions": {
+      "stage": "application.stage",
+      "source": "application.source"
+    }
+  },
+  "hr_training_count": {
+    "base_cube": "training_record",
+    "measure": "training_record.hr_training_count",
+    "matched_measure": "training_record.hr_training_count_matched",
+    "dimensions": {
+      "result": "training_record.result"
+    }
+  }
+}

@@ -1,6 +1,8 @@
 // Client for the analysis service. Direct connection for now; this moves
 // behind the gateway once it exists.
 
+import { getToken } from "@/lib/auth-api"
+
 export const ANALYSIS_API =
   process.env.NEXT_PUBLIC_ANALYSIS_API_URL ?? "/api/analysis"
 
@@ -105,9 +107,17 @@ export type MetricQueryResult = {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // Carry the caller's token so the service can identify them: detail-mode
+  // /analyze masks sensitive columns (e.g. 月薪) for non-admins, so an admin
+  // must present their Bearer token to see plaintext.
+  const token = getToken()
   const res = await fetch(`${ANALYSIS_API}${path}`, {
-    headers: { "content-type": "application/json" },
     ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers as Record<string, string> | undefined),
+    },
   })
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
   return (await res.json()) as T

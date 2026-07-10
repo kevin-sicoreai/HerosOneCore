@@ -1,0 +1,39 @@
+# Generated from ontology object type 'application'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: application
+    sql: SELECT * FROM read_parquet('/data/raw/applications.parquet')
+
+    joins:
+      - name: position
+        sql: "{CUBE}.position_id = {position}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: position_id
+        sql: position_id
+        type: number
+      - name: candidate_name
+        sql: candidate_name
+        type: string
+      - name: stage
+        sql: stage
+        type: string
+      - name: applied_at
+        sql: applied_at
+        type: time
+      - name: source
+        sql: source
+        type: string
+
+    measures:
+      - name: hr_application_count
+        title: 招聘投递数
+        type: count
+      - name: hr_application_count_matched
+        title: 招聘投递数·命中行数
+        type: count

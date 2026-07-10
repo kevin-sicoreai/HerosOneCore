@@ -1,7 +1,10 @@
 """Analysis endpoints: table catalog and aggregation queries."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 
+from app.core import classifications
+from app.core.audit import emit_sensitive_read
+from app.core.auth import actor_from_authorization, perms_from_authorization
 from app.repositories.provider import provider
 from app.schemas.analysis import AnalyzeRequest, AnalyzeResult, ColumnOut, TableOut
 from app.services import analyze
@@ -33,6 +36,29 @@ def get_table(name: str) -> TableOut:
 
 
 @router.post("/analyze", response_model=AnalyzeResult)
-def run_analysis(req: AnalyzeRequest) -> AnalyzeResult:
+def run_analysis(req: AnalyzeRequest, authorization: str | None = Header(default=None)) -> AnalyzeResult:
     table = provider.get_table(req.table)
-    return analyze.run(table, req)
+    result = analyze.run(table, req)
+
+    # Governance masking + audit — detail mode only. Analysis reads raw rows with
+    # a service token (so aggregates over sensitive columns stay correct), which
+    # means detail mode would otherwise hand plaintext to every caller. Aggregate
+    # mode is not masked: aggregate values are derived numbers the platform policy
+    # permits (e.g. average salary), and the sensitive raw values never leave here.
+    if result.mode == "detail":
+        sensitive = classifications.sensitive_columns_for_table(table.name)
+        # rows are keyed by field name; only columns present in this table matter.
+        hit = sensitive & {c.name for c in table.columns}
+        if hit:
+            perms = perms_from_authorization(authorization)
+            masked = not perms.get("can_admin")
+            if masked:
+                for row in result.rows:
+                    for col in hit:
+                        if col in row:
+                            row[col] = "***"
+            # Audit every sensitive read, masked or plaintext (target = table's
+            # Chinese label so the trail reads in business terms).
+            emit_sensitive_read(actor_from_authorization(authorization), table.label, masked)
+
+    return result

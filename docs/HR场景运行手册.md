@@ -72,6 +72,23 @@ cd apps/web && npm install && npm run dev    # http://localhost:3000
 登录账号:`admin/admin`(平台管理员,可见薪酬明文)、
 `analyst/analyst`(数据分析师,薪酬/绩效列显示 ***)。
 
+### 5. 指标引擎(Cube,可选)
+
+analysis 的 `/metrics/query` 默认走 Cube(自研引擎作兜底)。先由本体生成
+Cube schema,再拉起容器:
+
+```bash
+cd services/analysis && python -m app.tools.generate_cube_schema   # 生成 cube/model/
+bash cube/up.sh                                                    # 起 askdelphi-cube(:4000)
+```
+
+生成器每对象类型产一个 `cube/model/cubes/<api_name>.yml`(敏感列不出维度)+
+`metric_map.json`(指标→Cube 成员映射)。重跑覆盖输出目录,幂等。
+
+引擎切换:analysis 默认 `METRICS_ENGINE=cube`;想强制自研引擎设
+`METRICS_ENGINE=native`。Cube 不可用(未起/连不上/成员缺失)时,查询自动
+回落自研引擎,结果 `meta.engine` 标 `cube` / `native` / `native-fallback`。
+
 ## 验收清单(跑完应全部成立)
 
 1. **数据页**:16 个数据集(14 raw + 2 mart),中文显示名 + 英文标识副标
@@ -91,6 +108,8 @@ cd apps/web && npm install && npm run dev    # http://localhost:3000
   是历史 dbt 进程残留句柄;新建一个管道(新 id 新目录)或重启机器。
 - 分析服务对行集有 **30 秒缓存**,数据面变化最多延迟 30 秒可见。
 - 服务间读接口开放、写接口需 token;analysis 自铸服务令牌读全量算聚合,
-  终端用户的掩码在本体/数据服务出口完成。
+  终端用户的掩码在本体/数据服务出口完成。analysis 的 `/analyze` **明细模式**
+  也按治理分级对敏感列(如月薪)就地掩码并发审计;**聚合模式不掩码**
+  (聚合值为派生数,平台策略允许)。
 - 各服务 SQLite 文件名以各自 `app/core/config.py` 默认值为准;
   data 服务如本地已有历史库,注意 `DATABASE_URL` 与实际文件一致。
