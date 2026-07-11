@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import {
   BarChart3Icon,
   BoxesIcon,
@@ -10,6 +11,7 @@ import {
   FilterIcon,
   Loader2Icon,
   MapIcon,
+  RadarIcon,
   RouteIcon,
   SearchIcon,
   Share2Icon,
@@ -26,10 +28,12 @@ import {
 } from "@/lib/ontology-api"
 import { analysisApi, type AnalysisColumn, type FilterSpec } from "@/lib/analysis-api"
 import {
+  ANALYSIS_HANDOFF_KEY,
   collectPivotKeys,
   facetFilters,
   pivotDirections,
   pivotInFilter,
+  type AnalysisHandoff,
   type PivotDirection,
 } from "@/lib/object-set"
 import { fieldLabel } from "@/lib/field-labels"
@@ -304,6 +308,9 @@ function InstanceList({
   const [pivotMenuOpen, setPivotMenuOpen] = React.useState(false)
   const [pivotBusy, setPivotBusy] = React.useState(false)
   const [pivotError, setPivotError] = React.useState<string | null>(null)
+  // "Open in analysis workbench" handoff (navigates away) in-flight flag.
+  const [handoffBusy, setHandoffBusy] = React.useState(false)
+  const router = useRouter()
 
   React.useEffect(() => {
     let cancelled = false
@@ -582,6 +589,40 @@ function InstanceList({
     }
   }
 
+  // Hand the current object set off to the analysis workbench: package the type,
+  // its compiled filters (facets + any derived pivot `in`), a human description,
+  // and the true match count, then navigate. The workbench opens it as a
+  // "source" step of its analysis path. The description reuses the pivot chain
+  // phrasing so it reads the same as the chain chip.
+  async function openInWorkbench() {
+    if (handoffBusy) return
+    setHandoffBusy(true)
+    setPivotError(null)
+    try {
+      const base = derived ? derived.chainText : `${focus.display_name}${facetSummary}`
+      // A derived set's chain text is captured at pivot time; append any facets
+      // applied afterwards so the description matches the compiled filters.
+      const desc = derived && facetSummary ? `${base}${facetSummary}` : base
+      const matched = await analysisApi
+        .analyze({
+          table: focus.api_name,
+          group_by: null,
+          metrics: [],
+          filters: lensFilters,
+          page: 1,
+          page_size: 1,
+        })
+        .then((r) => r.matched_rows)
+        .catch(() => 0)
+      const payload: AnalysisHandoff = { table: focus.api_name, desc, filters: lensFilters, matched }
+      window.sessionStorage.setItem(ANALYSIS_HANDOFF_KEY, JSON.stringify(payload))
+      router.push("/analysis?from=explorer")
+    } catch {
+      setPivotError("移交失败：分析服务未启动或查询出错")
+      setHandoffBusy(false)
+    }
+  }
+
   // Map point drill-in: pin the clicked value as the geo facet's sole selection
   // and switch back to the list to show those instances.
   function drillGeo(value: string) {
@@ -758,6 +799,21 @@ function InstanceList({
             )}
           </div>
         )}
+
+        {/* Open the current object set in the analysis workbench (a handoff). */}
+        <button
+          onClick={openInWorkbench}
+          disabled={handoffBusy}
+          title="把当前对象集带到分析工作台，作为分析的起点"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+        >
+          {handoffBusy ? (
+            <Loader2Icon className="size-4 animate-spin" />
+          ) : (
+            <RadarIcon className="size-4" />
+          )}
+          在分析工作台打开
+        </button>
 
         {/* Active facet filters as removable chips (shown across all views). */}
         {activeFacets.flatMap(([col, set]) =>

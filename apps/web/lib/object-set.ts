@@ -12,6 +12,22 @@ import type { LinkType } from "@/lib/ontology-api"
 // be unwieldy and the set too broad to be a meaningful drill-down.
 export const PIVOT_KEY_LIMIT = 1000
 
+// sessionStorage key for the object-browser → analysis-workbench handoff. The
+// explorer writes the current object set here and navigates to /analysis; the
+// workbench reads it once on mount and clears it immediately.
+export const ANALYSIS_HANDOFF_KEY = "askdelphi.analysis.handoff"
+
+// The packaged object set handed to the workbench: the object type, a
+// human-readable description (reusing the explorer's chain-chip phrasing), the
+// compiled filters (facet selections + any derived pivot `in`), and the current
+// match count.
+export type AnalysisHandoff = {
+  table: string
+  desc: string
+  filters: FilterSpec[]
+  matched: number
+}
+
 // One traversable direction of a link, resolved relative to a base object type.
 // `sourceKeyColumn` is the column whose distinct values we collect on the current
 // (source) set; `targetColumn` is the column on the peer type the `in` filter

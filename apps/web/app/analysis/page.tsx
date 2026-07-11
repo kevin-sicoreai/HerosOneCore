@@ -4,11 +4,13 @@ import * as React from "react"
 import {
   BarChart3Icon,
   CalendarClockIcon,
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronsUpDownIcon,
   ChevronUpIcon,
   FilterIcon,
+  FolderOpenIcon,
   LayoutDashboardIcon,
   Loader2Icon,
   MapIcon,
@@ -16,8 +18,10 @@ import {
   RadarIcon,
   RefreshCwIcon,
   RouteIcon,
+  SaveIcon,
   Share2Icon,
   TableIcon,
+  Trash2Icon,
   WifiOffIcon,
   XIcon,
 } from "lucide-react"
@@ -25,6 +29,7 @@ import {
 import {
   analysisApi,
   type AnalysisColumn,
+  type AnalysisDefinition,
   type AnalysisTable,
   type AnalyzeResult,
   type FilterOp,
@@ -33,14 +38,20 @@ import {
   type MetricAgg,
   type MetricQueryResult,
   type MetricSpec,
+  type SavedAnalysisDetail,
+  type SavedAnalysisSummary,
+  type SavedPathStep,
 } from "@/lib/analysis-api"
 import { ontologyApi, type GraphNode, type LinkType } from "@/lib/ontology-api"
 import {
+  ANALYSIS_HANDOFF_KEY,
   collectPivotKeys,
   pivotDirections,
   pivotInFilter,
+  type AnalysisHandoff,
   type PivotDirection,
 } from "@/lib/object-set"
+import { timeAgo } from "@/lib/assist-api"
 import { fieldLabel } from "@/lib/field-labels"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { MapView, TimelineView } from "@/components/object-lenses"
@@ -112,16 +123,42 @@ function formatMetricValue(value: number, agg: string, unit: string): string {
   return s
 }
 
-// One pivot hop in the analysis path: the object set was pinned to peer type
-// `targetTable` by `inFilter`, following link `linkLabel`. `matched` is the peer
-// row count (for the breadcrumb). The active query table after this hop is
-// `targetTable`; the last step's `inFilter` is the derived filter on every query.
-type PathStep = {
+// One step of the analysis path. The active query table after a step is its
+// `targetTable`; the *last* step's derived filters attach to every /analyze.
+//
+// A "source" step is a handoff from the object browser: its `filters` (facet
+// selections + any pivot `in`) are the derived filters and are directly
+// replayable (facets recompile against current data).
+//
+// A "pivot" step is a set-level "search around": `inFilter` is the compiled `in`
+// filter for the current session, while `linkId` + `reverse` + `stepFilters`
+// (the user filters active when the pivot was taken) are the *recipe* — enough
+// to recompile the keys against current data on re-open (we never persist the
+// compiled key list).
+type SourceStep = {
+  kind: "source"
+  desc: string
+  targetTable: string
+  targetLabel: string
+  filters: FilterSpec[]
+  matched: number
+}
+type PivotStep = {
+  kind: "pivot"
+  linkId: string
+  reverse: boolean
   linkLabel: string
   targetTable: string
   targetLabel: string
+  stepFilters: FilterSpec[]
   inFilter: FilterSpec
   matched: number
+}
+type PathStep = SourceStep | PivotStep
+
+// The derived filters a step contributes to queries while it is the last step.
+function stepDerivedFilters(step: PathStep): FilterSpec[] {
+  return step.kind === "source" ? step.filters : [step.inFilter]
 }
 
 // Human label for the current lens, shown as the trailing breadcrumb segment.
@@ -179,24 +216,43 @@ export default function AnalysisPage() {
     { metric: Metric; total: MetricQueryResult | null; byDim: MetricQueryResult | null }[] | null
   >(null)
   const [dashLoading, setDashLoading] = React.useState(false)
+  // --- Saved analyses (Contour-style recipes). ---
+  const [savedList, setSavedList] = React.useState<SavedAnalysisSummary[]>([])
+  // Non-null when the workbench was opened from a saved analysis: saving then
+  // updates it (PUT) instead of creating a new one.
+  const [currentAnalysisId, setCurrentAnalysisId] = React.useState<string | null>(null)
+  const [currentAnalysisName, setCurrentAnalysisName] = React.useState<string>("")
+  const [savedMenuOpen, setSavedMenuOpen] = React.useState(false)
+  const [saveOpen, setSaveOpen] = React.useState(false)
+  const [saveName, setSaveName] = React.useState("")
+  const [saveBusy, setSaveBusy] = React.useState(false)
+  const [justSaved, setJustSaved] = React.useState(false)
+  // Set when replaying a saved analysis stops early (link gone / set over limit).
+  const [replayError, setReplayError] = React.useState<string | null>(null)
 
   const table = tables.find((t) => t.name === tableName) ?? null
   const dimensions = table?.columns.filter((c) => c.kind === "dimension" && c.name !== "id") ?? []
   const measures = table?.columns.filter((c) => c.kind === "measure") ?? []
 
-  // --- Analysis-path (pivot) derivations. ---
+  // --- Analysis-path (pivot / source) derivations. ---
   const pivotActive = pathSteps.length > 0
-  // The derived `in` filter attached to every query while a pivot is active.
-  const derivedFilter = pivotActive ? pathSteps[pathSteps.length - 1].inFilter : null
-  // Non-empty user filters, then the derived filter — the filter list every
-  // /analyze lens sends. A pivot flows through unchanged.
+  // The derived filters attached to every query while a path is active: the last
+  // step's contribution (a source step's facet+in filters, or a pivot's `in`).
+  const derivedFilters = React.useMemo<FilterSpec[]>(
+    () => (pivotActive ? stepDerivedFilters(pathSteps[pathSteps.length - 1]) : []),
+    [pivotActive, pathSteps]
+  )
+  // The source step, when the path begins with a handoff from the object browser.
+  const sourceStep = pathSteps[0]?.kind === "source" ? (pathSteps[0] as SourceStep) : null
+  // Non-empty user filters, then the derived filters — the filter list every
+  // /analyze lens sends. A pivot / source set flows through unchanged.
   const cleanUserFilters = React.useMemo(
     () => filters.filter((f) => String(f.value).toString().trim() !== ""),
     [filters]
   )
   const queryFilters = React.useMemo<FilterSpec[]>(
-    () => [...cleanUserFilters, ...(derivedFilter ? [derivedFilter] : [])],
-    [cleanUserFilters, derivedFilter]
+    () => [...cleanUserFilters, ...derivedFilters],
+    [cleanUserFilters, derivedFilters]
   )
   const nodeByApi = React.useMemo(() => {
     const m = new Map<string, GraphNode>()
@@ -244,19 +300,41 @@ export default function AnalysisPage() {
     [allMetrics, timeCol, geoCol, chartMetrics, pivotActive]
   )
 
-  // Load the catalog + metric definitions, select the first table.
+  // Load the catalog + metric definitions. If the object browser handed off an
+  // object set (sessionStorage), open it as a "source" step; otherwise select
+  // the first table. The handoff is read once and cleared immediately.
+  //
+  // Guarded so it runs exactly once: consuming the sessionStorage handoff is not
+  // idempotent, so React's StrictMode double-invoke would otherwise read it on
+  // the first pass and clobber the source step with selectTable on the second.
+  const didInit = React.useRef(false)
   React.useEffect(() => {
+    if (didInit.current) return
+    didInit.current = true
+    let handoff: AnalysisHandoff | null = null
+    try {
+      const raw = window.sessionStorage.getItem(ANALYSIS_HANDOFF_KEY)
+      if (raw) {
+        window.sessionStorage.removeItem(ANALYSIS_HANDOFF_KEY)
+        handoff = JSON.parse(raw) as AnalysisHandoff
+      }
+    } catch {
+      handoff = null
+    }
     analysisApi
       .tables()
       .then((ts) => {
         setTables(ts)
-        if (ts.length > 0) selectTable(ts[0])
+        if (handoff) applyHandoff(handoff, ts)
+        else if (ts.length > 0) selectTable(ts[0])
       })
       .catch(() => setOffline(true))
     analysisApi
       .metrics()
       .then(setAllMetrics)
       .catch(() => setOffline(true))
+    // The saved-analysis catalog; failure (e.g. offline) just leaves it empty.
+    analysisApi.listAnalyses().then(setSavedList).catch(() => {})
     // Ontology metadata drives set-level pivots; failure just disables them.
     Promise.all([ontologyApi.graph(), ontologyApi.linkTypes().catch(() => [])])
       .then(([g, lts]) => {
@@ -269,9 +347,13 @@ export default function AnalysisPage() {
 
   function selectTable(t: AnalysisTable) {
     setTableName(t.name)
-    // Selecting a base type from the rail starts a fresh path (drops any pivots).
+    // Selecting a base type from the rail starts a fresh path (drops any pivots)
+    // and detaches from any opened saved analysis.
     setPathSteps([])
     setOrigin(null)
+    setCurrentAnalysisId(null)
+    setCurrentAnalysisName("")
+    setReplayError(null)
     setPivotError(null)
     setPivotMenuOpen(false)
     // Default to detail mode: no grouping, no measure — show all rows as-is.
@@ -283,6 +365,39 @@ export default function AnalysisPage() {
     setOrderBy(null)
     setOrderDir("asc")
     // Reset the chart lens selection; it repopulates from the new type's metrics.
+    setChartMetricKey("")
+    setChartDimKey("")
+    setMetricResult(null)
+  }
+
+  // Open a handoff from the object browser as the path's "source" step: switch
+  // to its table, attach its filters as the (hidden) derived filters, and start
+  // the user filters empty. This is a fresh, unsaved analysis.
+  function applyHandoff(payload: AnalysisHandoff, ts: AnalysisTable[]) {
+    const label = ts.find((t) => t.name === payload.table)?.label ?? payload.table
+    setTableName(payload.table)
+    setPathSteps([
+      {
+        kind: "source",
+        desc: payload.desc,
+        targetTable: payload.table,
+        targetLabel: label,
+        filters: payload.filters,
+        matched: payload.matched,
+      },
+    ])
+    setOrigin(null)
+    setCurrentAnalysisId(null)
+    setCurrentAnalysisName("")
+    setReplayError(null)
+    setPivotError(null)
+    setPivotMenuOpen(false)
+    setGroupBy("")
+    setMetrics([])
+    setFilters([])
+    setResult(null)
+    setOrderBy(null)
+    setOrderDir("asc")
     setChartMetricKey("")
     setChartDimKey("")
     setMetricResult(null)
@@ -494,16 +609,25 @@ export default function AnalysisPage() {
         })
         .then((r) => r.matched_rows)
         .catch(() => 0)
-      // Capture the origin on the first pivot (before the table switches).
-      setOrigin(
-        (o) => o ?? { table: tableName, label: table?.label ?? tableName, count: table?.row_count ?? 0 }
-      )
+      // Capture the origin on the first pivot (before the table switches), but
+      // not when the path already starts from a source step — that step is the
+      // origin, so a separate origin would double the breadcrumb.
+      setOrigin((o) => {
+        if (o) return o
+        if (pathSteps[0]?.kind === "source") return null
+        return { table: tableName, label: table?.label ?? tableName, count: table?.row_count ?? 0 }
+      })
       setPathSteps((s) => [
         ...s,
         {
+          kind: "pivot",
+          linkId: dir.link.id,
+          reverse: dir.reverse,
           linkLabel: dir.link.display_name,
           targetTable: target.api_name,
           targetLabel: target.display_name,
+          // The user filters active at pivot time are the replay recipe.
+          stepFilters: cleanUserFilters,
           inFilter,
           matched,
         },
@@ -520,9 +644,12 @@ export default function AnalysisPage() {
 
   // Breadcrumb backtrack: to the origin (drop all pivots) or to a given step
   // (drop later pivots). User config is reset to that step's state.
+  // "起始" backtrack: drop the whole path and return to plain mode on the base
+  // table — the source step's table (handoff origin) or the captured origin.
   function goToOrigin() {
-    if (!origin) return
-    setTableName(origin.table)
+    const base = sourceStep ? sourceStep.targetTable : origin?.table
+    if (!base) return
+    setTableName(base)
     setPathSteps([])
     setOrigin(null)
     setPivotError(null)
@@ -535,6 +662,207 @@ export default function AnalysisPage() {
     setTableName(step.targetTable)
     setPivotError(null)
     resetUserConfig()
+  }
+
+  // --- Saved analyses: build / save / open (replay). ---
+
+  // The path's base table + label + count (for the "起始" breadcrumb and the
+  // saved recipe). The source step's table when the path is a handoff, else the
+  // captured pivot origin, else the plain active table.
+  const startTable = sourceStep ? sourceStep.targetTable : origin?.table ?? tableName
+  const startLabel = sourceStep
+    ? tables.find((t) => t.name === sourceStep.targetTable)?.label ?? sourceStep.targetTable
+    : pivotActive
+      ? origin?.label ?? ""
+      : table?.label ?? tableName
+  const startCount = sourceStep
+    ? tables.find((t) => t.name === sourceStep.targetTable)?.row_count ?? 0
+    : pivotActive
+      ? origin?.count ?? 0
+      : table?.row_count ?? 0
+
+  // Serialize the current workbench state to a replayable recipe. Pivot steps
+  // persist their link + direction + step filters (not the compiled key list);
+  // source steps persist their (replayable) filters + description.
+  function buildDefinition(): AnalysisDefinition {
+    const path: SavedPathStep[] = pathSteps.map((s) =>
+      s.kind === "source"
+        ? { kind: "source", desc: s.desc, table: s.targetTable, filters: s.filters }
+        : {
+            kind: "pivot",
+            linkId: s.linkId,
+            reverse: s.reverse,
+            linkLabel: s.linkLabel,
+            stepFilters: s.stepFilters,
+          }
+    )
+    return { table: startTable, lens, groupBy, metrics, filters: cleanUserFilters, path }
+  }
+
+  // Cheap match-count probe for a table under some filters (page_size 1).
+  const probeCount = React.useCallback(
+    (t: string, f: FilterSpec[]) =>
+      analysisApi
+        .analyze({ table: t, group_by: null, metrics: [], filters: f, page: 1, page_size: 1 })
+        .then((r) => r.matched_rows)
+        .catch(() => 0),
+    []
+  )
+
+  // Replay a saved recipe: restore table/lens/config, then recompile the path
+  // step by step against current data. A source step attaches its filters
+  // directly; each pivot re-collects keys (its step filters + upstream derived)
+  // into a fresh `in` filter with a current match count. On the first failure
+  // (link gone / set over limit / empty / service error) replay stops at the
+  // previous step and surfaces a notice — the page never crashes.
+  async function applyDefinition(d: SavedAnalysisDetail) {
+    const def = d.definition
+    setReplayError(null)
+    let activeTable = def.table
+    let derived: FilterSpec[] = []
+    const rebuilt: PathStep[] = []
+    let originCap: { table: string; label: string; count: number } | null = null
+    let stopped = false
+    const steps = def.path ?? []
+    for (let idx = 0; idx < steps.length; idx++) {
+      const st = steps[idx]
+      if (st.kind === "source") {
+        activeTable = st.table
+        derived = st.filters
+        const label = tables.find((t) => t.name === st.table)?.label ?? st.table
+        const matched = await probeCount(st.table, st.filters)
+        rebuilt.push({
+          kind: "source",
+          desc: st.desc,
+          targetTable: st.table,
+          targetLabel: label,
+          filters: st.filters,
+          matched,
+        })
+        continue
+      }
+      // Pivot step: resolve the direction from the recorded link id + direction.
+      const baseId = nodeByApi.get(activeTable)?.id
+      const dir = baseId
+        ? pivotDirections(linkTypes, baseId).find(
+            (x) => x.link.id === st.linkId && x.reverse === st.reverse
+          )
+        : undefined
+      const target = dir ? nodeById.get(dir.targetTypeId) : undefined
+      if (!dir || !target) {
+        setReplayError("某个关系已不存在，分析在上一步停止")
+        stopped = true
+        break
+      }
+      let collected
+      try {
+        collected = await collectPivotKeys(activeTable, dir.sourceKeyColumn, [
+          ...st.stepFilters,
+          ...derived,
+        ])
+      } catch {
+        setReplayError("重放某一步时分析服务出错，已停在上一步")
+        stopped = true
+        break
+      }
+      if (collected.overLimit) {
+        setReplayError(`某一步对象集过大（${collected.keys.length}+ 个键），分析在上一步停止`)
+        stopped = true
+        break
+      }
+      if (collected.keys.length === 0) {
+        setReplayError("某一步对象集为空或无有效关联键，分析在上一步停止")
+        stopped = true
+        break
+      }
+      const inFilter = pivotInFilter(dir.targetColumn, collected.keys)
+      const matched = await probeCount(target.api_name, [inFilter])
+      // Capture the origin only when the path starts with a pivot.
+      if (idx === 0) {
+        originCap = {
+          table: activeTable,
+          label: tables.find((t) => t.name === activeTable)?.label ?? activeTable,
+          count: tables.find((t) => t.name === activeTable)?.row_count ?? 0,
+        }
+      }
+      activeTable = target.api_name
+      derived = [inFilter]
+      rebuilt.push({
+        kind: "pivot",
+        linkId: st.linkId,
+        reverse: st.reverse,
+        linkLabel: dir.link.display_name,
+        targetTable: target.api_name,
+        targetLabel: target.display_name,
+        stepFilters: st.stepFilters,
+        inFilter,
+        matched,
+      })
+    }
+    setPathSteps(rebuilt)
+    setOrigin(originCap)
+    setTableName(activeTable)
+    setGroupBy(def.groupBy || "")
+    setMetrics(def.metrics ?? [])
+    // Restore user filters only if the whole path replayed — a partial replay
+    // may leave us on an intermediate table whose columns differ.
+    setFilters(stopped ? [] : def.filters ?? [])
+    setLens((def.lens as Lens) || "table")
+    setPage(1)
+    setResult(null)
+    setOrderBy(null)
+    setOrderDir("asc")
+    setChartMetricKey("")
+    setChartDimKey("")
+    setMetricResult(null)
+  }
+
+  async function openAnalysis(id: string) {
+    setSavedMenuOpen(false)
+    try {
+      const d = await analysisApi.getAnalysis(id)
+      await applyDefinition(d)
+      setCurrentAnalysisId(d.id)
+      setCurrentAnalysisName(d.name)
+    } catch {
+      setReplayError("打开分析失败：分析服务未启动或数据出错")
+    }
+  }
+
+  async function doSave() {
+    const name = saveName.trim()
+    if (!name || saveBusy) return
+    setSaveBusy(true)
+    try {
+      const definition = buildDefinition()
+      const saved = currentAnalysisId
+        ? await analysisApi.updateAnalysis(currentAnalysisId, { name, definition })
+        : await analysisApi.createAnalysis({ name, definition })
+      setCurrentAnalysisId(saved.id)
+      setCurrentAnalysisName(saved.name)
+      const list = await analysisApi.listAnalyses().catch(() => null)
+      if (list) setSavedList(list)
+      setSaveOpen(false)
+      setJustSaved(true)
+      window.setTimeout(() => setJustSaved(false), 1600)
+    } catch {
+      setReplayError("保存失败：请确认已登录，且分析服务可用")
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
+  async function deleteSaved(id: string) {
+    try {
+      await analysisApi.deleteAnalysis(id)
+      setSavedList((l) => l.filter((x) => x.id !== id))
+      if (currentAnalysisId === id) {
+        setCurrentAnalysisId(null)
+        setCurrentAnalysisName("")
+      }
+    } catch {
+      setReplayError("删除失败：仅创建者或管理员可删除")
+    }
   }
 
   // Drill from the map into the detail table filtered to one geo value.
@@ -581,15 +909,148 @@ export default function AnalysisPage() {
         desc="围绕对象集的指标、图表、时间轴与地理分析"
         icon={<RadarIcon />}
         actions={
-          offline ? (
-            <Badge variant="warning">
-              <WifiOffIcon /> 分析服务未启动
-            </Badge>
-          ) : (
-            <Badge variant="brand">数据分析</Badge>
-          )
+          <div className="flex items-center gap-2">
+            {currentAnalysisName && (
+              <span
+                className="hidden max-w-[180px] truncate text-sm font-medium text-foreground md:inline"
+                title={currentAnalysisName}
+              >
+                {currentAnalysisName}
+              </span>
+            )}
+
+            {/* "我的分析" — open a saved analysis (two-click delete per item). */}
+            <div className="relative">
+              <button
+                onClick={() => setSavedMenuOpen((o) => !o)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground"
+              >
+                <FolderOpenIcon className="size-4" /> 我的分析
+                <ChevronDownIcon className="size-3.5" />
+              </button>
+              {savedMenuOpen && (
+                <>
+                  <button
+                    className="fixed inset-0 z-10 cursor-default"
+                    aria-hidden
+                    onClick={() => setSavedMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 z-20 mt-1 w-80 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+                    <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+                      已保存的分析
+                    </div>
+                    {savedList.length === 0 ? (
+                      <div className="px-3 py-5 text-center text-sm text-muted-foreground">
+                        {offline ? "分析服务未启动" : "暂无保存的分析"}
+                      </div>
+                    ) : (
+                      <div className="max-h-72 overflow-auto py-1">
+                        {savedList.map((s) => (
+                          <SavedAnalysisRow
+                            key={s.id}
+                            item={s}
+                            active={s.id === currentAnalysisId}
+                            onOpen={() => openAnalysis(s.id)}
+                            onDelete={() => deleteSaved(s.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* "保存" — update the opened analysis (PUT) or create a new one (POST). */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setSaveName(currentAnalysisName || "")
+                  setSaveOpen((o) => !o)
+                }}
+                disabled={!table}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm transition-colors disabled:opacity-50 ${
+                  justSaved
+                    ? "border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
+                    : "border-border hover:border-emerald-500/40 hover:text-foreground"
+                }`}
+              >
+                {justSaved ? (
+                  <>
+                    <CheckIcon className="size-4" /> 已保存
+                  </>
+                ) : (
+                  <>
+                    <SaveIcon className="size-4" /> 保存
+                  </>
+                )}
+              </button>
+              {saveOpen && (
+                <>
+                  <button
+                    className="fixed inset-0 z-10 cursor-default"
+                    aria-hidden
+                    onClick={() => setSaveOpen(false)}
+                  />
+                  <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-border bg-card p-3 shadow-lg">
+                    <div className="mb-2 text-xs text-muted-foreground">
+                      {currentAnalysisId ? "更新当前分析（可改名）" : "保存为新分析"}
+                    </div>
+                    <Input
+                      autoFocus
+                      value={saveName}
+                      onChange={(e) => setSaveName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") doSave()
+                      }}
+                      placeholder="分析名称"
+                      className="h-8"
+                    />
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button
+                        onClick={() => setSaveOpen(false)}
+                        className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        取消
+                      </button>
+                      <button
+                        onClick={doSave}
+                        disabled={!saveName.trim() || saveBusy}
+                        className="inline-flex items-center gap-1 rounded-md bg-emerald-500/90 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+                      >
+                        {saveBusy && <Loader2Icon className="size-3 animate-spin" />}
+                        {currentAnalysisId ? "更新" : "保存"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {offline ? (
+              <Badge variant="warning">
+                <WifiOffIcon /> 分析服务未启动
+              </Badge>
+            ) : (
+              <Badge variant="brand">数据分析</Badge>
+            )}
+          </div>
         }
       />
+
+      {/* Replay / save notice — non-fatal, dismissible. */}
+      {replayError && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <span className="min-w-0 flex-1">{replayError}</span>
+          <button
+            onClick={() => setReplayError(null)}
+            className="shrink-0 rounded p-0.5 hover:text-amber-900 dark:hover:text-amber-100"
+            aria-label="关闭提示"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Analysis path breadcrumb: the traceable trail from the origin object set
           through any pivots to the current lens. Segments are clickable to
@@ -608,8 +1069,7 @@ export default function AnalysisPage() {
                 : "font-medium text-foreground"
             }`}
           >
-            起始：{pivotActive ? origin?.label : table?.label}(
-            {(pivotActive ? origin?.count ?? 0 : table?.row_count ?? 0).toLocaleString()})
+            起始：{startLabel}({startCount.toLocaleString()})
           </button>
           {!pivotActive && cleanUserFilters.length > 0 && (
             <>
@@ -630,7 +1090,9 @@ export default function AnalysisPage() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                沿『{s.linkLabel}』→ {s.targetLabel}({s.matched.toLocaleString()})
+                {s.kind === "source"
+                  ? `来自对象浏览器：${s.desc}（${s.matched.toLocaleString()} 条）`
+                  : `沿『${s.linkLabel}』→ ${s.targetLabel}(${s.matched.toLocaleString()})`}
               </button>
             </React.Fragment>
           ))}
@@ -1511,6 +1973,69 @@ function ResultTable({
         ))}
       </tbody>
     </table>
+  )
+}
+
+// One row in the "我的分析" dropdown. Delete uses a two-step confirm (mirrors
+// the assist session list): the first click arms the trash icon, a second click
+// within 3s deletes; opening the analysis is the row's primary click.
+function SavedAnalysisRow({
+  item,
+  active,
+  onOpen,
+  onDelete,
+}: {
+  item: SavedAnalysisSummary
+  active: boolean
+  onOpen: () => void
+  onDelete: () => void
+}) {
+  const [confirming, setConfirming] = React.useState(false)
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  React.useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    []
+  )
+
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation() // never open the analysis when hitting delete
+    if (!confirming) {
+      setConfirming(true)
+      timerRef.current = setTimeout(() => setConfirming(false), 3000)
+      return
+    }
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setConfirming(false)
+    onDelete()
+  }
+
+  return (
+    <div
+      onClick={onOpen}
+      className={`group relative flex cursor-pointer flex-col items-start px-3 py-1.5 text-left text-sm transition-colors ${
+        active ? "bg-muted" : "hover:bg-muted/60"
+      } ${confirming ? "ring-1 ring-inset ring-red-500/60" : ""}`}
+    >
+      <span className="line-clamp-1 pr-6">{item.name}</span>
+      <span className="text-xs text-muted-foreground">
+        {item.owner ?? "匿名"} · {timeAgo(item.updated_at)}
+      </span>
+      <button
+        type="button"
+        onClick={handleDelete}
+        title={confirming ? "再次点击确认删除" : "删除分析"}
+        className={`absolute top-1.5 right-2 flex size-6 items-center justify-center rounded-md transition-opacity ${
+          confirming
+            ? "text-red-500 opacity-100"
+            : "text-muted-foreground opacity-0 hover:text-red-500 group-hover:opacity-100"
+        }`}
+      >
+        <Trash2Icon className="size-3.5" />
+      </button>
+    </div>
   )
 }
 

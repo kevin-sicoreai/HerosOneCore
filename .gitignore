@@ -94,6 +94,7 @@ desktop.ini
 *.egg-info/
 data_service.db
 analysis.db
+analysis_service.db
 assist_service.db
 marketplace_service.db
 app_builder_service.db

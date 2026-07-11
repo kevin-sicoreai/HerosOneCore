@@ -109,10 +109,48 @@ export type MetricQueryResult = {
   meta: Record<string, unknown>
 }
 
+// --- Saved analyses (Contour-style recipes) ---
+
+// One replayable step of the analysis path. A "source" step is a handoff from
+// the object browser: its `filters` (facet + any pivot `in`) are themselves the
+// recipe. A "pivot" step is a set-level "search around": it stores the link id +
+// direction + the user filters active when it was taken, so it can be recompiled
+// against current data (never the compiled key list).
+export type SavedPathStep =
+  | { kind: "source"; desc: string; table: string; filters: FilterSpec[] }
+  | { kind: "pivot"; linkId: string; reverse: boolean; linkLabel: string; stepFilters: FilterSpec[] }
+
+// The transparent recipe stored per saved analysis. Re-opening re-runs it
+// against current data, so values may differ — that is the intended semantics.
+export type AnalysisDefinition = {
+  // The base object type the path starts from (equals the active type when the
+  // path is empty).
+  table: string
+  lens: string
+  groupBy: string
+  metrics: MetricSpec[]
+  // User (workbench) filters on the active object set.
+  filters: FilterSpec[]
+  path: SavedPathStep[]
+}
+
+export type SavedAnalysisSummary = {
+  id: string
+  name: string
+  owner: string | null
+  updated_at: string
+}
+
+export type SavedAnalysisDetail = SavedAnalysisSummary & {
+  created_at: string
+  definition: AnalysisDefinition
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // Carry the caller's token so the service can identify them: detail-mode
   // /analyze masks sensitive columns (e.g. 月薪) for non-admins, so an admin
-  // must present their Bearer token to see plaintext.
+  // must present their Bearer token to see plaintext. Writes to /analyses also
+  // rely on it for ownership.
   const token = getToken()
   const res = await fetch(`${ANALYSIS_API}${path}`, {
     ...init,
@@ -123,6 +161,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     },
   })
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  // 204 (DELETE) has no body to parse.
+  if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
@@ -133,4 +173,13 @@ export const analysisApi = {
   metrics: () => req<Metric[]>("/metrics"),
   queryMetric: (body: MetricQueryRequest) =>
     req<MetricQueryResult>("/metrics/query", { method: "POST", body: JSON.stringify(body) }),
+
+  // Saved analyses CRUD (Bearer carried by req).
+  listAnalyses: () => req<SavedAnalysisSummary[]>("/analyses"),
+  getAnalysis: (id: string) => req<SavedAnalysisDetail>(`/analyses/${id}`),
+  createAnalysis: (body: { name: string; definition: AnalysisDefinition }) =>
+    req<SavedAnalysisDetail>("/analyses", { method: "POST", body: JSON.stringify(body) }),
+  updateAnalysis: (id: string, body: { name?: string; definition?: AnalysisDefinition }) =>
+    req<SavedAnalysisDetail>(`/analyses/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteAnalysis: (id: string) => req<void>(`/analyses/${id}`, { method: "DELETE" }),
 }

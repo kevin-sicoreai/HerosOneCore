@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     # the process cwd. Points at the repo-level cube/model by default.
     cube_metric_map: str = "../../cube/model/metric_map.json"
 
+    # --- Saved analyses store ------------------------------------------------
+    # Contour-style analysis "recipes" (transparent JSON definitions) persist
+    # here. Filename matches the .gitignore entry so the local dev DB is never
+    # committed; kept separate from the orphaned analysis.db so the two never
+    # share a schema. Env: DATABASE_URL.
+    database_url: str = Field(
+        default="sqlite:///./analysis_service.db", validation_alias="DATABASE_URL"
+    )
+
     log_level: str = "INFO"
 
 
