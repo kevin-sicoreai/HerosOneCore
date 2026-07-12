@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { HouseIcon } from "lucide-react"
 
 import { AppLogo } from "@/components/app-logo"
+import { useCurrentUser } from "@/components/current-user"
 import { APP_LAYERS } from "@/lib/apps"
 import {
   Sidebar,
@@ -21,6 +22,16 @@ import {
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()
+  const { me } = useCurrentUser()
+  const canAdmin = me?.permissions.can_admin ?? false
+
+  // Soft-hiding only: non-admins don't see adminOnly items in the menu, but the
+  // routes remain reachable by direct URL (server read APIs are open by design
+  // at this stage). A group with no visible items is dropped entirely.
+  const layers = APP_LAYERS.map((layer) => ({
+    ...layer,
+    apps: layer.apps.filter((app) => canAdmin || !app.adminOnly),
+  })).filter((layer) => layer.apps.length > 0)
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -43,7 +54,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarMenu>
         </SidebarGroup>
 
-        {APP_LAYERS.map((layer) => (
+        {layers.map((layer) => (
           <SidebarGroup key={layer.key}>
             <SidebarGroupLabel>{layer.label}</SidebarGroupLabel>
             <SidebarMenu>

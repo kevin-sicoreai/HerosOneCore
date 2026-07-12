@@ -11,9 +11,10 @@ import {
   UserIcon,
 } from "lucide-react"
 
-import { authApi, clearToken, type Me } from "@/lib/auth-api"
+import { clearToken } from "@/lib/auth-api"
 import { findApp } from "@/lib/apps"
 import { AppLauncher } from "@/components/app-launcher"
+import { useCurrentUser } from "@/components/current-user"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -66,11 +67,8 @@ function ThemeToggle() {
 
 function UserMenu() {
   const router = useRouter()
-  const [me, setMe] = React.useState<Me | null>(null)
-
-  React.useEffect(() => {
-    authApi.me().then(setMe).catch(() => setMe(null))
-  }, [])
+  // Reuse the shell's single /me fetch instead of requesting it again here.
+  const { me } = useCurrentUser()
 
   function logout() {
     clearToken()

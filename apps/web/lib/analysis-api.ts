@@ -83,6 +83,34 @@ export type Metric = {
   dimensions: MetricDimension[]
 }
 
+// --- Metric semantics (read-only 口径 catalog for the /metrics page) ---
+
+export type SemanticDimension = {
+  key: string
+  label: string
+  // Underlying column: Cube member when mapped, else the object property.
+  mapped_column: string
+}
+
+export type CubeMapping = {
+  mapped: boolean
+  cube: string | null
+  measure: string | null
+}
+
+export type MetricSemantics = {
+  key: string
+  label: string
+  agg: string
+  unit: string
+  base_type: string
+  base_label: string
+  description: string
+  dimensions: SemanticDimension[]
+  cube: CubeMapping
+  engine_default: string
+}
+
 export type MetricQueryRequest = {
   metric: string
   dimension?: string | null
@@ -171,6 +199,7 @@ export const analysisApi = {
   analyze: (body: AnalyzeRequest) =>
     req<AnalyzeResult>("/analyze", { method: "POST", body: JSON.stringify(body) }),
   metrics: () => req<Metric[]>("/metrics"),
+  metricSemantics: () => req<MetricSemantics[]>("/metrics/semantics"),
   queryMetric: (body: MetricQueryRequest) =>
     req<MetricQueryResult>("/metrics/query", { method: "POST", body: JSON.stringify(body) }),
 

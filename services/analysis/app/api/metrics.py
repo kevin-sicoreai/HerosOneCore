@@ -4,10 +4,22 @@ from fastapi import APIRouter
 
 from app.domain.metrics import BASE_LABELS as _BASE_LABELS
 from app.domain.metrics import METRICS
-from app.schemas.metrics import DimensionOut, MetricOut, MetricQueryRequest, MetricQueryResult
+from app.schemas.metrics import (
+    DimensionOut,
+    MetricOut,
+    MetricQueryRequest,
+    MetricQueryResult,
+    MetricSemanticsOut,
+)
 from app.services import metric_query
 
 router = APIRouter(tags=["metrics"])
+
+
+@router.get("/metrics/semantics", response_model=list[MetricSemanticsOut])
+def list_metric_semantics() -> list[MetricSemanticsOut]:
+    """Read-only 口径 catalog for the /metrics page (no query execution)."""
+    return metric_query.list_semantics()
 
 
 @router.get("/metrics", response_model=list[MetricOut])

@@ -3,16 +3,28 @@
 import * as React from "react"
 import { usePathname, useRouter } from "next/navigation"
 
-import { authApi, clearToken, getToken } from "@/lib/auth-api"
+import { clearToken, getToken } from "@/lib/auth-api"
+import { findApp } from "@/lib/apps"
+import { pushRecent } from "@/lib/recent"
 import { AppSidebar } from "@/components/app-sidebar"
+import { CurrentUserProvider, useCurrentUser } from "@/components/current-user"
 import { TopBar } from "@/components/top-bar"
 import { ResourceDrawerProvider } from "@/components/resource-detail-drawer"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  // Provider fetches /me once; the gate and menus below read it from context.
+  return (
+    <CurrentUserProvider>
+      <AppShellInner>{children}</AppShellInner>
+    </CurrentUserProvider>
+  )
+}
+
+function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const [authed, setAuthed] = React.useState<boolean | null>(null)
+  const { me, loading } = useCurrentUser()
 
   React.useEffect(() => {
     if (pathname === "/login") return
@@ -20,29 +32,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       router.replace("/login")
       return
     }
-    // A token is present, but it may be expired/invalid — verify it against the
-    // auth service before trusting it, so stale sessions redirect to login
-    // instead of leaving the user on a page where every request fails.
-    let active = true
-    authApi.me().then((me) => {
-      if (!active) return
-      if (me) {
-        setAuthed(true)
-      } else {
-        clearToken()
-        router.replace("/login")
-      }
-    })
-    return () => {
-      active = false
+    // Token present but /me came back empty (expired/invalid) — drop the stale
+    // token and redirect instead of leaving the user on a failing page.
+    if (!loading && !me) {
+      clearToken()
+      router.replace("/login")
     }
-  }, [pathname, router])
+  }, [pathname, loading, me, router])
+
+  // Record the visited page for the home "最近访问" card. Only exact registry
+  // matches are tracked (findApp), so run/builder detail routes like /apps/[id]
+  // are skipped rather than mapped — keeps the list to known menu destinations.
+  // The home page itself and the login page are never recorded.
+  React.useEffect(() => {
+    if (pathname === "/" || pathname === "/login") return
+    const app = findApp(pathname)
+    if (app) pushRecent({ href: app.href, title: app.title, ts: Date.now() })
+  }, [pathname])
 
   // Login page renders standalone (no sidebar/topbar).
   if (pathname === "/login") return <>{children}</>
 
-  // Gate protected routes until a token is confirmed on the client.
-  if (!authed)
+  // Gate protected routes until /me resolves on the client.
+  if (loading || !me)
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
         跳转到登录…

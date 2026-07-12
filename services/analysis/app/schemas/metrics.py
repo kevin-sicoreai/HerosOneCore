@@ -23,6 +23,40 @@ class MetricOut(BaseModel):
     dimensions: list[DimensionOut]
 
 
+class SemanticDimensionOut(BaseModel):
+    key: str
+    label: str
+    # The underlying column a dimension groups by: the Cube member (e.g.
+    # "department.name") when the metric is Cube-mapped, otherwise the base/linked
+    # object property.
+    mapped_column: str
+
+
+class CubeMappingOut(BaseModel):
+    # Whether the metric is mapped to a Cube deployment in metric_map.json.
+    mapped: bool
+    # Base cube name and the mapped measure member; null for native-only metrics.
+    cube: str | None = None
+    measure: str | None = None
+
+
+class MetricSemanticsOut(BaseModel):
+    """Read-only semantic (口径) view of a metric for the /metrics page."""
+
+    key: str
+    label: str
+    agg: str
+    unit: str
+    base_type: str
+    base_label: str
+    # Plain-Chinese caliber description derived from the metric definition.
+    description: str
+    dimensions: list[SemanticDimensionOut]
+    cube: CubeMappingOut
+    # The service-wide default metric engine (settings.metrics_engine).
+    engine_default: str
+
+
 class MetricQueryRequest(BaseModel):
     metric: str
     # None = overall value (single "整体" bucket); otherwise a dimension key.

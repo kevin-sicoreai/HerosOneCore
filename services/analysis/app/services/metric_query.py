@@ -25,10 +25,16 @@ from fastapi import HTTPException, status
 from app.clients import cube_service, ontology_service
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.domain.metrics import BASE_LABELS, METRICS, Dimension, Metric
+from app.domain.metrics import BASE_LABELS, METRICS, Dimension, Metric, describe
 from app.repositories import object_rows
 from app.schemas.analysis import FilterSpec
-from app.schemas.metrics import MetricGroupRow, MetricQueryResult
+from app.schemas.metrics import (
+    CubeMappingOut,
+    MetricGroupRow,
+    MetricQueryResult,
+    MetricSemanticsOut,
+    SemanticDimensionOut,
+)
 from app.services.analyze import _matches, _to_number
 
 logger = get_logger("metric_query")
@@ -324,6 +330,48 @@ def _query_native(
         matched_rows=len(rows),
         meta=meta,
     )
+
+
+def list_semantics() -> list[MetricSemanticsOut]:
+    """Read-only semantic view of every metric: derived 口径 description, usable
+    dimensions (with their mapped column) and Cube mapping status. Pure read over
+    the in-memory definitions and metric_map.json — no storage, no live query."""
+    mapping_all = _metric_map()
+    out: list[MetricSemanticsOut] = []
+    for m in METRICS.values():
+        mapping = mapping_all.get(m.key)
+        dim_members: dict[str, str] = (mapping or {}).get("dimensions", {})
+        dims = [
+            SemanticDimensionOut(
+                key=d.key,
+                label=d.label,
+                # Prefer the Cube member when mapped; otherwise the object property
+                # (prefixed with the traversed link for cross-object dimensions).
+                mapped_column=dim_members.get(d.key)
+                or (f"{d.via_link}.{d.property}" if d.via_link else d.property),
+            )
+            for d in m.dimensions
+        ]
+        cube = CubeMappingOut(
+            mapped=mapping is not None,
+            cube=mapping.get("base_cube") if mapping else None,
+            measure=mapping.get("measure") if mapping else None,
+        )
+        out.append(
+            MetricSemanticsOut(
+                key=m.key,
+                label=m.label,
+                agg=m.agg,
+                unit=m.unit,
+                base_type=m.base_type,
+                base_label=BASE_LABELS.get(m.base_type, m.base_type),
+                description=describe(m),
+                dimensions=dims,
+                cube=cube,
+                engine_default=settings.metrics_engine,
+            )
+        )
+    return out
 
 
 def query(

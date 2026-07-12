@@ -4,6 +4,7 @@ import Link from "next/link"
 import { LayoutGridIcon } from "lucide-react"
 
 import { APP_LAYERS } from "@/lib/apps"
+import { useCurrentUser } from "@/components/current-user"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -12,6 +13,16 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 export function AppLauncher() {
+  const { me } = useCurrentUser()
+  const canAdmin = me?.permissions.can_admin ?? false
+
+  // Soft-hiding only (see app-sidebar): hide adminOnly items and empty groups
+  // from non-admins; the routes stay reachable by direct URL.
+  const layers = APP_LAYERS.map((layer) => ({
+    ...layer,
+    apps: layer.apps.filter((app) => canAdmin || !app.adminOnly),
+  })).filter((layer) => layer.apps.length > 0)
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -26,7 +37,7 @@ export function AppLauncher() {
           应用启动器
         </div>
         <div className="space-y-3">
-          {APP_LAYERS.map((layer) => (
+          {layers.map((layer) => (
             <div key={layer.key}>
               <div className="mb-1.5 px-1 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
                 {layer.label}

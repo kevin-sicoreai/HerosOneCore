@@ -6,6 +6,7 @@ import {
   BlocksIcon,
   BoxesIcon,
   ChevronRightIcon,
+  ClockIcon,
   DatabaseIcon,
   FolderIcon,
   PlugIcon,
@@ -17,6 +18,8 @@ import {
 import { dataApi } from "@/lib/data-api"
 import { ontologyApi } from "@/lib/ontology-api"
 import { pipelineApi } from "@/lib/pipeline-api"
+import { findApp } from "@/lib/apps"
+import { readRecent, type RecentEntry } from "@/lib/recent"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
@@ -96,7 +99,7 @@ export default function HomePage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
         {STATS.map((s) => (
           <Card key={s.label} className="gap-2 py-3">
             <CardContent className="flex items-center gap-3">
@@ -111,6 +114,8 @@ export default function HomePage() {
           </Card>
         ))}
       </div>
+
+      <RecentVisits />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -158,6 +163,61 @@ export default function HomePage() {
         </Card>
       </div>
     </PageContainer>
+  )
+}
+
+function relTime(ts: number): string {
+  const diff = Date.now() - ts
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return "刚刚"
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day} 天前`
+  return new Date(ts).toLocaleDateString("zh-CN")
+}
+
+function RecentVisits() {
+  // localStorage isn't reactive; read once on mount (the shell writes on nav).
+  const [items, setItems] = React.useState<RecentEntry[]>([])
+  React.useEffect(() => setItems(readRecent().slice(0, 8)), [])
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ClockIcon className="size-4 text-muted-foreground" /> 最近访问
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {items.length === 0 ? (
+          <div className="py-4 text-center text-sm text-muted-foreground">暂无访问记录</div>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2">
+            {items.map((it) => {
+              const app = findApp(it.href)
+              const Icon = app?.icon ?? BlocksIcon
+              return (
+                <Link
+                  key={it.href}
+                  href={it.href}
+                  className="flex items-center gap-2.5 rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:border-emerald-500/40"
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+                    <Icon className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{it.title}</div>
+                    <div className="text-xs text-muted-foreground">{relTime(it.ts)}</div>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

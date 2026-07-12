@@ -2,8 +2,10 @@ import {
   BotIcon,
   BoxesIcon,
   DatabaseIcon,
+  GaugeIcon,
   LayoutDashboardIcon,
   LayoutGridIcon,
+  LayoutTemplateIcon,
   Share2Icon,
   ShieldCheckIcon,
   WorkflowIcon,
@@ -22,6 +24,9 @@ export type AppDef = {
   href: string
   icon: LucideIcon
   desc: string
+  // When true, the item is only shown to admins (can_admin). This is menu-level
+  // soft-hiding only — see app-sidebar / app-launcher for the filtering.
+  adminOnly?: boolean
 }
 
 // The App launcher / left-rail registry, grouped by the architecture's layers.
@@ -44,17 +49,25 @@ export const APP_LAYERS: AppLayer[] = [
   },
   {
     // Business applications assembled in the app builder (Puck) and served by
-    // the native runtime. The builder is entered through the catalog, so this
-    // layer surfaces a single "应用目录" item rather than a separate builder link.
+    // the native runtime. Split into two postures: "我的应用" (management —
+    // create / edit / publish / delete, the builder is entered here) and
+    // "应用目录" (consumption — browse and run published apps only).
     key: "apps",
     label: "业务应用",
     apps: [
+      {
+        key: "apps-mine",
+        title: "我的应用",
+        href: "/apps/mine",
+        icon: LayoutTemplateIcon,
+        desc: "管理你创建的应用 · 搭建 / 发布 / 删除",
+      },
       {
         key: "apps",
         title: "应用目录",
         href: "/apps",
         icon: LayoutGridIcon,
-        desc: "搭建与运行业务应用 · Puck 驱动",
+        desc: "浏览并运行已发布的业务应用",
       },
     ],
   },
@@ -91,6 +104,7 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/data",
         icon: DatabaseIcon,
         desc: "连接器与数据源",
+        adminOnly: true,
       },
       {
         key: "pipeline",
@@ -98,6 +112,7 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/pipeline",
         icon: WorkflowIcon,
         desc: "拖拽式数据管道 DAG",
+        adminOnly: true,
       },
       {
         key: "ontology",
@@ -105,6 +120,16 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/ontology",
         icon: Share2Icon,
         desc: "对象 / 链接 / 属性建模",
+        adminOnly: true,
+      },
+      {
+        // All-users: read-only view of metric semantics (口径). Not adminOnly, so
+        // an analyst still sees this group (with only this item) after filtering.
+        key: "metrics",
+        title: "指标语义",
+        href: "/metrics",
+        icon: GaugeIcon,
+        desc: "指标口径 · 维度 · Cube 映射（只读）",
       },
     ],
   },
@@ -118,6 +143,7 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/governance",
         icon: ShieldCheckIcon,
         desc: "权限 · 血缘 · 审计 · 合规",
+        adminOnly: true,
       },
     ],
   },

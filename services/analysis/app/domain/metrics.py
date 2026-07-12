@@ -77,6 +77,50 @@ _EMP_DEPT_NAME = Dimension("dept_name", "所属部门", "name", via_link="所属
 _EMP_POSITION_LEVEL = Dimension("position_level", "职级", "level", via_link="担任职位")
 _EMP_CITY = Dimension("city", "城市", "city")
 
+# Chinese labels for base-type *properties* that appear in metric definitions
+# but are not dimensions (measures, base_filters, numerator). Dimension labels
+# are preferred first; this fills the gap so the derived 口径 description reads
+# as natural language instead of raw column names.
+_PROP_LABELS: dict[str, str] = {
+    "status": "状态",
+    "monthly_salary": "月薪",
+    "score": "得分",
+    "headcount_plan": "编制人数",
+}
+
+
+def _prop_label(metric: "Metric", prop: str) -> str:
+    for d in metric.dimensions:
+        if d.property == prop:
+            return d.label
+    return _PROP_LABELS.get(prop, prop)
+
+
+def describe(metric: "Metric") -> str:
+    """Derive a plain-Chinese caliber (口径) sentence from a metric's structure.
+
+    Reads only the definition (agg / measure / base_filters / numerator), so the
+    description always matches how the metric is actually computed.
+    """
+    base = BASE_LABELS.get(metric.base_type, metric.base_type)
+    scope = ""
+    if metric.base_filters:
+        conds = "、".join(f"{_prop_label(metric, p)}={v}" for p, v in metric.base_filters)
+        scope = f" 中 {conds}"
+    if metric.agg == "count":
+        return f"统计 {base}{scope} 的数量"
+    if metric.agg == "rate":
+        if metric.numerator:
+            prop, val = metric.numerator
+            return f"计算 {base} 中 {_prop_label(metric, prop)}={val} 的占比"
+        return f"计算 {base} 的占比"
+    verb = {"sum": "求和", "avg": "求平均", "max": "取最大值", "min": "取最小值"}.get(
+        metric.agg, metric.agg
+    )
+    measure_label = _prop_label(metric, metric.measure) if metric.measure else metric.agg
+    return f"对 {base}{scope} 的 {measure_label} {verb}"
+
+
 METRICS: dict[str, Metric] = {
     m.key: m
     for m in [
