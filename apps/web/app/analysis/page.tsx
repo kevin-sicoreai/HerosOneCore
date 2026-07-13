@@ -20,6 +20,7 @@ import {
   RouteIcon,
   SaveIcon,
   Share2Icon,
+  SparklesIcon,
   TableIcon,
   Trash2Icon,
   WifiOffIcon,
@@ -36,6 +37,7 @@ import {
   type FilterSpec,
   type Metric,
   type MetricAgg,
+  type MetricGroupRow,
   type MetricQueryResult,
   type MetricSpec,
   type SavedAnalysisDetail,
@@ -51,12 +53,18 @@ import {
   type AnalysisHandoff,
   type PivotDirection,
 } from "@/lib/object-set"
-import { timeAgo } from "@/lib/assist-api"
+import {
+  assistApi,
+  timeAgo,
+  type AiInterpretRequest,
+  type AiMetricQueryResult,
+} from "@/lib/assist-api"
 import { fieldLabel } from "@/lib/field-labels"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { MapView, TimelineView } from "@/components/object-lenses"
 import { MetricBarChart } from "@/components/metric-bar-chart"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Pagination } from "@/components/ui/pagination"
 
@@ -66,7 +74,7 @@ import { Pagination } from "@/components/ui/pagination"
 // lives in the ontology manager, not here.
 type Lens = "table" | "chart" | "timeline" | "map"
 
-// The two top-level modes of this page. "dashboard" is the global HR metric board
+// The two top-level modes of this page. "dashboard" is the global metric board
 // (no object set, no config); "analysis" is the saveable step-board document.
 type PageMode = "dashboard" | "analysis"
 
@@ -163,7 +171,7 @@ function stepDerivedFilters(step: PathStep): FilterSpec[] {
   return step.kind === "source" ? step.filters : [step.inFilter]
 }
 
-// Compact one-line summary of a filter list (e.g. "状态=离职，城市包含北京"), used
+// Compact one-line summary of a filter list (e.g. "状态=已完成，城市包含上海"), used
 // as a pivot board's "基于：…" subtitle. Arrays only ever arrive on the hidden
 // pivot-derived `in` filter, which is never summarized here.
 function summarizeFilters(fs: FilterSpec[]): string {
@@ -1716,6 +1724,239 @@ function ChartStatStrip({ metricResult }: { metricResult: MetricQueryResult | nu
   )
 }
 
+// Horizontal-bar list (name left, proportional bar centre, formatted value
+// right). Shared by the dashboard breakdown panel and the AI 问数 result so the
+// two render identically.
+function MetricBarList({
+  rows,
+  agg,
+  unit,
+}: {
+  rows: MetricGroupRow[]
+  agg: string
+  unit: string
+}) {
+  const max = rows.reduce((m, r) => Math.max(m, r.value), 0)
+  return (
+    <div className="space-y-1.5">
+      {rows.map((r) => {
+        const pct = max > 0 ? Math.max((r.value / max) * 100, 1) : 0
+        return (
+          <div key={r.group} className="group flex items-center gap-3">
+            <div
+              className="w-24 shrink-0 truncate text-right text-sm text-muted-foreground"
+              title={r.group}
+            >
+              {r.group}
+            </div>
+            <div className="relative h-5 min-w-0 flex-1 rounded-md bg-muted/40">
+              <div
+                className="h-full rounded-md bg-emerald-500/80 transition-colors group-hover:bg-emerald-500"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
+              {formatMetricValue(r.value, agg, unit)}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// AI 解读: a ghost button that asks the assist service to narrate an
+// already-masked aggregate payload, then shows the returned insight inline.
+// The frontend sends only the numbers it is already displaying — assist never
+// fetches raw data. Re-clicking re-runs the interpretation.
+function InterpretBlock({ payload }: { payload: AiInterpretRequest }) {
+  const [busy, setBusy] = React.useState(false)
+  const [text, setText] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+
+  async function run() {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await assistApi.aiInterpret(payload)
+      setText(res.text)
+    } catch {
+      setError("AI 解读失败，请重试")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="xs"
+        disabled={busy}
+        onClick={() => run()}
+        className="text-muted-foreground hover:text-foreground"
+      >
+        {busy ? (
+          <Loader2Icon className="animate-spin" />
+        ) : (
+          <SparklesIcon className="text-emerald-500" />
+        )}
+        AI 解读
+      </Button>
+      {error && <div className="mt-1 text-xs text-danger">{error}</div>}
+      {text && (
+        <div className="mt-2 flex items-start gap-2 rounded-md border-l-2 border-emerald-500/60 bg-muted/30 px-3 py-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          <span className="min-w-0 flex-1">{text}</span>
+          <button
+            onClick={() => setText(null)}
+            className="shrink-0 rounded p-0.5 hover:text-foreground"
+            aria-label="关闭解读"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
+// AI 问数: ask a natural-language question; the assist service picks the metric
+// (+ optional dimension / filters), and this component executes the query
+// itself via analysisApi (carrying the user's token, so governance masking /
+// audit stay on the user's identity). All state is local so dashboard refreshes
+// never disturb the last answer.
+function AiAskCard() {
+  const [question, setQuestion] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  // The model's "no metric fits" outcome — a normal result shown as a muted note.
+  const [note, setNote] = React.useState<string | null>(null)
+  const [result, setResult] = React.useState<{
+    res: AiMetricQueryResult
+    data: MetricQueryResult
+  } | null>(null)
+
+  async function ask() {
+    const q = question.trim()
+    if (!q || busy) return
+    setBusy(true)
+    setError(null)
+    setNote(null)
+    try {
+      const res = await assistApi.aiMetricQuery(q)
+      if (res.error) {
+        setNote(res.error)
+        setResult(null)
+        return
+      }
+      const data = await analysisApi.queryMetric({
+        metric: res.metric!,
+        dimension: res.dimension ?? null,
+        filters: (res.filters ?? []).map((f) => ({
+          field: f.field,
+          op: "eq" as const,
+          value: f.value,
+        })),
+        limit: 10,
+      })
+      setResult({ res, data })
+    } catch {
+      setError("AI 问数失败，请稍后再试")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mb-3 rounded-lg border border-border bg-background/40 p-3">
+      <div className="mb-2 flex items-center gap-1.5">
+        <SparklesIcon className="size-4 text-emerald-500" />
+        <span className="text-xs text-muted-foreground">AI 问数</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          className="h-8"
+          placeholder="例如：各状态的订单销售额是多少"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) ask()
+          }}
+        />
+        <Button size="sm" disabled={busy || question.trim() === ""} onClick={() => ask()}>
+          {busy ? <Loader2Icon className="animate-spin" /> : <SparklesIcon />}
+          提问
+        </Button>
+      </div>
+
+      {note && <div className="mt-2 text-sm text-muted-foreground">{note}</div>}
+      {error && (
+        <div className="mt-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-3 rounded-lg border border-border bg-background/40 p-3">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs text-muted-foreground">
+                {result.res.metric_label}
+                {result.res.dimension_label ? ` · 按${result.res.dimension_label}` : ""}
+              </div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">
+                {formatMetricValue(result.data.total, result.data.agg, result.data.unit)}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                基于 {result.data.matched_rows.toLocaleString()} 个对象
+              </div>
+            </div>
+            <button
+              onClick={() => setResult(null)}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+              aria-label="清除结果"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </div>
+
+          {result.data.rows.length > 0 && (
+            <div className="mt-3">
+              <MetricBarList
+                rows={result.data.rows}
+                agg={result.data.agg}
+                unit={result.data.unit}
+              />
+            </div>
+          )}
+
+          {result.res.reason && (
+            <div className="mt-2 text-xs text-muted-foreground">
+              「口径」{result.res.reason}
+            </div>
+          )}
+
+          <div className="mt-2">
+            <InterpretBlock
+              payload={{
+                title: result.res.dimension_label
+                  ? `${result.res.metric_label} · 按${result.res.dimension_label}`
+                  : result.res.metric_label ?? "",
+                unit: result.data.unit,
+                agg: result.data.agg,
+                total: result.data.total,
+                matched_rows: result.data.matched_rows,
+                rows: result.data.rows,
+                question,
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // --- Dashboard lens canvas: a platform-wide overview generated from the metric
 // catalog — stat cards for every metric plus a bar-chart panel per dimensioned
 // metric. No hardcoded scenario content: it re-derives from `data` entirely. ---
@@ -1765,6 +2006,10 @@ function DashboardCanvas({
           <RefreshCwIcon className={`size-3 ${loading ? "animate-spin" : ""}`} /> 刷新
         </button>
       </div>
+
+      {/* AI 问数 sits outside the dimming wrapper so a board refresh never dims
+          the last answer, and its local state survives refreshes. */}
+      <AiAskCard />
 
       {/* Dim the body while refreshing over cached content (never flash empty). */}
       <div className={`transition-opacity ${loading ? "opacity-60" : ""}`}>
@@ -1817,7 +2062,6 @@ function DashboardChartPanel({
   byDim: MetricQueryResult | null
 }) {
   const rows = byDim?.rows ?? []
-  const max = rows.reduce((m, r) => Math.max(m, r.value), 0)
   // Fall back to the metric's own label/agg/unit when the breakdown query failed.
   const dimLabel = byDim?.dimension_label ?? metric.dimensions[0]?.label ?? ""
   const agg = byDim?.agg ?? metric.agg
@@ -1831,30 +2075,23 @@ function DashboardChartPanel({
       {rows.length === 0 ? (
         <div className="py-6 text-center text-sm text-muted-foreground">暂无数据</div>
       ) : (
-        <div className="space-y-1.5">
-          {rows.map((r) => {
-            const pct = max > 0 ? Math.max((r.value / max) * 100, 1) : 0
-            return (
-              <div key={r.group} className="group flex items-center gap-3">
-                <div
-                  className="w-24 shrink-0 truncate text-right text-sm text-muted-foreground"
-                  title={r.group}
-                >
-                  {r.group}
-                </div>
-                <div className="relative h-5 min-w-0 flex-1 rounded-md bg-muted/40">
-                  <div
-                    className="h-full rounded-md bg-emerald-500/80 transition-colors group-hover:bg-emerald-500"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <div className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
-                  {formatMetricValue(r.value, agg, unit)}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <>
+          <MetricBarList rows={rows} agg={agg} unit={unit} />
+          {/* AI 解读: button + insight text, under the bars. Built from this
+              panel's own props (authoritative, already-masked aggregates). */}
+          <div className="mt-2">
+            <InterpretBlock
+              payload={{
+                title: `${metric.label} · 按${dimLabel}`,
+                unit,
+                agg,
+                total: byDim?.total ?? null,
+                matched_rows: byDim?.matched_rows ?? null,
+                rows,
+              }}
+            />
+          </div>
+        </>
       )}
     </div>
   )

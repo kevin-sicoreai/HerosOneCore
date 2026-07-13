@@ -44,6 +44,35 @@ export type ChatExtras = {
   charts?: ChartPayload[]
 }
 
+// --- AI workbench features (analysis page): NL metric query + interpretation.
+// Both are one-shot, stateless calls to the assist service's /ai/* endpoints.
+
+// Result of translating a natural-language question into a metric query config.
+// The assist service only *picks* the metric/dimension/filters; the frontend
+// executes the query itself (carrying the user's token). `error` is a normal
+// outcome (no metric fits) rendered inline, not an HTTP failure.
+export type AiMetricQueryResult = {
+  metric?: string
+  metric_label?: string
+  dimension?: string | null
+  dimension_label?: string | null
+  filters?: { field: string; value: string }[]
+  reason?: string
+  error?: string
+}
+
+// Payload for AI interpretation: the already-masked aggregate rows the frontend
+// is displaying. Assist never fetches raw data — it only narrates these numbers.
+export type AiInterpretRequest = {
+  title: string
+  unit?: string | null
+  agg?: string | null
+  total?: number | null
+  matched_rows?: number | null
+  rows: { group: string; value: number | string }[]
+  question?: string | null
+}
+
 export type ChatSession = {
   id: string
   title: string
@@ -83,6 +112,21 @@ export const assistApi = {
   createSession: () => req<ChatSession>("/sessions", { method: "POST" }),
   deleteSession: (id: string) => req<void>(`/sessions/${id}`, { method: "DELETE" }),
   messages: (id: string) => req<ChatMessage[]>(`/sessions/${id}/messages`),
+
+  // Translate a natural-language question into a metric query config (the
+  // frontend then executes it via analysisApi.queryMetric with the user token).
+  aiMetricQuery: (question: string) =>
+    req<AiMetricQueryResult>("/ai/metric-query", {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    }),
+
+  // Ask the assist service to narrate a set of already-masked aggregate rows.
+  aiInterpret: (body: AiInterpretRequest) =>
+    req<{ text: string }>("/ai/interpret", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // POSTs the user message and feeds parsed SSE events to the callback until
   // the stream closes.
