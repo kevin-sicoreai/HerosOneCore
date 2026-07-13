@@ -33,8 +33,8 @@ _graph_cache: tuple[float, dict[str, Any]] | None = None
 _types_cache: tuple[float, list[dict[str, Any]]] | None = None
 
 # Analysis is a trusted data-plane service: it self-mints a short-lived service
-# token so the ontology grants it the *unmasked* values (e.g. monthly_salary,
-# which is masked to "***" for non-admin callers) needed to compute aggregates.
+# token so the ontology grants it the *unmasked* values (e.g. a column governance
+# marks sensitive, masked to "***" for non-admin callers) needed to compute aggregates.
 # Self-contained per service (no shared library): this mirrors the ontology
 # auth service's HS256 scheme and reads the same JWT_SECRET.
 _JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")

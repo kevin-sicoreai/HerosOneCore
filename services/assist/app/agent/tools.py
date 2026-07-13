@@ -306,7 +306,7 @@ def list_metrics() -> str:
 def query_metric(
     metric: str, dimension: str = "", filter_field: str = "", filter_value: str = ""
 ) -> str:
-    """计算一个命名业务指标，可选按某维度分组、可选单条等值过滤。用于回答指标类问题（如「哪个区域采购额最高」→ metric=purchase_total, dimension=supplier_region）。
+    """计算一个命名业务指标，可选按某维度分组、可选单条等值过滤。用于回答指标类问题（如「哪个类别的客服工单最多」→ metric=ops_ticket_count, dimension=category）。
 
     Args:
         metric: 指标 key（来自 list_metrics，如 purchase_total）。

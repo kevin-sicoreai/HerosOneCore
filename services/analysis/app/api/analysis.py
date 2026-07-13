@@ -44,7 +44,7 @@ def run_analysis(req: AnalyzeRequest, authorization: str | None = Header(default
     # a service token (so aggregates over sensitive columns stay correct), which
     # means detail mode would otherwise hand plaintext to every caller. Aggregate
     # mode is not masked: aggregate values are derived numbers the platform policy
-    # permits (e.g. average salary), and the sensitive raw values never leave here.
+    # permits (e.g. 平均满意度 / 订单销售额合计), and the sensitive raw values never leave here.
     if result.mode == "detail":
         sensitive = classifications.sensitive_columns_for_table(table.name)
         # rows are keyed by field name; only columns present in this table matter.

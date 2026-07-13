@@ -61,7 +61,7 @@ class MetricSemanticsOut(BaseModel):
 
 
 class MetricFilterIn(BaseModel):
-    """One 口径 (base) filter: equality only (the semantic pin, e.g. status=在职)."""
+    """One 口径 (base) filter: equality only (the semantic pin, e.g. status=已完成)."""
 
     property: str
     value: str

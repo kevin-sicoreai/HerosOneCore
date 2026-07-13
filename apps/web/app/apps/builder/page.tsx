@@ -304,7 +304,7 @@ export default function AppBuilderHomePage() {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && void handleCreate()}
-                placeholder="例如：招聘看板"
+                placeholder="例如：客服工单看板"
               />
             </Field>
 

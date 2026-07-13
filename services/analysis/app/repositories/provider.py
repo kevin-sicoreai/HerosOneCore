@@ -30,31 +30,15 @@ _NUMERIC_TYPES = {
 # dataset schema in English). Drives the config panel, aggregate headers, and
 # the detail table; unknown fields fall back to their raw name.
 _FIELD_LABELS = {
-    "id": "ID", "name": "名称", "email": "邮箱", "created_at": "创建时间",
-    "updated_at": "更新时间", "status": "状态", "amount": "金额",
-    "customer_id": "客户 ID", "region": "区域", "rating": "评级",
-    "lead_time_days": "交期(天)", "sku": "SKU", "category": "类别",
-    "unit_cost": "单位成本", "supplier_id": "供应商 ID", "product_id": "产品 ID",
-    "warehouse_id": "仓库 ID", "on_hand": "在库量", "reorder_point": "再订货点",
-    "city": "城市", "capacity": "容量", "order_date": "下单日期",
-    "total_amount": "总金额", "po_id": "采购单 ID", "ship_date": "发运日期",
-    "eta": "预计到达", "carrier": "承运商",
-    # HR scenario fields.
-    "monthly_salary": "月薪", "headcount_plan": "编制人数", "hire_date": "入职日期",
-    "term_date": "离职日期", "department_id": "部门 ID", "position_id": "职位 ID",
-    "title": "职位名称", "level": "职级", "gender": "性别", "age": "年龄",
-    "work_date": "日期", "hours": "工时", "base_salary": "基本工资",
-    "bonus": "奖金", "total": "合计", "month": "月份", "stage": "阶段",
-    "candidate_name": "候选人", "applied_at": "投递日期", "source": "渠道",
-    # HR ontology fields (performance / recruiting / training / HR events).
-    "cycle": "考核周期", "score": "绩效得分", "reviewer_id": "考核人",
-    "department_name": "部门名称", "training_id": "课程 ID", "completed_at": "完成时间",
-    "result": "结果", "promote_date": "晋升日期", "from_level": "原职级",
-    "to_level": "新职级", "transfer_date": "调动日期", "from_department_id": "原部门",
-    "to_department_id": "新部门", "reason": "原因", "leave_type": "请假类型",
-    "start_date": "开始日期", "end_date": "结束日期", "days": "天数",
-    "round": "轮次", "interviewer_id": "面试官", "interview_date": "面试日期",
-    "application_id": "投递 ID", "contract_type": "合同类型", "sign_date": "签订日期",
+    "id": "ID", "name": "名称", "created_at": "创建时间", "updated_at": "更新时间",
+    "status": "状态", "amount": "金额", "total_amount": "总金额",
+    "customer_id": "客户 ID", "supplier_id": "供应商 ID", "product_id": "产品 ID",
+    "warehouse_id": "仓库 ID", "department_id": "部门 ID",
+    "region": "区域", "city": "城市", "category": "类别", "rating": "评级",
+    "sku": "SKU", "unit_cost": "单位成本", "capacity": "容量",
+    "order_date": "下单日期", "start_date": "开始日期", "end_date": "结束日期",
+    "carrier": "承运商", "title": "职位名称", "stage": "阶段", "source": "渠道",
+    "score": "绩效得分", "result": "结果", "reason": "原因",
 }
 
 

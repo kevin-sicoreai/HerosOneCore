@@ -222,7 +222,7 @@ export type SavedAnalysisDetail = SavedAnalysisSummary & {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // Carry the caller's token so the service can identify them: detail-mode
-  // /analyze masks sensitive columns (e.g. 月薪) for non-admins, so an admin
+  // /analyze masks sensitive columns (governance-marked) for non-admins, so an admin
   // must present their Bearer token to see plaintext. Writes to /analyses also
   // rely on it for ownership.
   const token = getToken()

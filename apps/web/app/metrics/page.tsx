@@ -479,11 +479,11 @@ export default function MetricsSemanticsPage() {
               </div>
             )}
 
-            <Field label="指标 key" hint="英文标识，如 hr_leave_count">
+            <Field label="指标 key" hint="英文标识，如 ops_ticket_count">
               <Input
                 value={form.key}
                 disabled={editingKey !== null}
-                placeholder="hr_leave_count"
+                placeholder="ops_ticket_count"
                 onChange={(e) => setForm({ ...form, key: e.target.value })}
               />
             </Field>
@@ -491,7 +491,7 @@ export default function MetricsSemanticsPage() {
             <Field label="名称">
               <Input
                 value={form.label}
-                placeholder="请假人次"
+                placeholder="工单总数"
                 onChange={(e) => setForm({ ...form, label: e.target.value })}
               />
             </Field>
@@ -565,7 +565,7 @@ export default function MetricsSemanticsPage() {
                 <Field label="分子过滤 · 取值">
                   <Input
                     value={form.numeratorValue}
-                    placeholder="离职"
+                    placeholder="在用"
                     onChange={(e) => setForm({ ...form, numeratorValue: e.target.value })}
                   />
                 </Field>
@@ -604,7 +604,7 @@ export default function MetricsSemanticsPage() {
                   <Input
                     className="h-8"
                     value={f.value}
-                    placeholder="在职"
+                    placeholder="已完成"
                     onChange={(e) => {
                       const next = [...form.baseFilters]
                       next[i] = { ...f, value: e.target.value }

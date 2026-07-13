@@ -312,7 +312,7 @@ def _query_native(
     if dim and (dim.via_link_id or dim.via_link):
         _enrich_linked_dimension(rows, base_id, dim, onto)
 
-    # Metric-level fixed filters pin the 口径 (e.g. 在职 only) before any grouping.
+    # Metric-level fixed filters pin the 口径 (e.g. status=已完成 only) before any grouping.
     if metric.base_filters:
         rows = [
             r

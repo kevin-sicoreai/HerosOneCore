@@ -10,7 +10,7 @@ Responsibilities:
     of truth.
   * **seed** — on startup, idempotently copy the legacy hardcoded catalog
     (``app.domain.metrics.METRICS``) into the table so an empty DB comes up with
-    the same 7 HR metrics, semantics unchanged.
+    the current ops metrics, semantics unchanged.
   * **validate** — check a create/update payload against the live ontology
     (types, properties, links) before it is written, returning normalized DB
     fields or a 400 with a Chinese explanation.

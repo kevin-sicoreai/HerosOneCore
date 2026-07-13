@@ -39,10 +39,9 @@ const TRACE_ICON: Record<TraceIcon, React.ElementType> = {
 }
 
 const SUGGESTIONS = [
-  "员工 1024 是谁？他的绩效和培训记录怎么样",
-  "哪个部门离职率最高？",
-  "招聘漏斗各阶段有多少人？",
-  "生成本月人力月报",
+  "哪个类别的客服工单最多？",
+  "各状态的订单销售额分布如何？",
+  "维保工单主要集中在哪些故障类别？",
 ]
 
 type UIMessage = {
