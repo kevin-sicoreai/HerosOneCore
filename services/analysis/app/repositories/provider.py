@@ -7,6 +7,7 @@ business-facing semantic layer — not raw datasets. MockProvider (the built-in
 devices/orders tables) remains for offline use.
 """
 
+import threading
 import time
 from typing import Protocol
 
@@ -14,8 +15,11 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.clients import ontology_service
+from app.core.logging import get_logger
 from app.domain.tables import TABLES, Column, Table
 from app.repositories import object_rows
+
+logger = get_logger("provider")
 
 _NUMERIC_TYPES = {
     "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT",
@@ -97,41 +101,94 @@ class MockProvider:
         return table
 
 
-# Process-wide TTL cache for the table catalog. Building it fans out to the
-# ontology (one graph call + one detail per type); a short TTL keeps repeated
-# page loads cheap while still reflecting ontology edits within ~30s.
-_CATALOG_TTL_SECONDS = 30.0
+# Process-wide catalog cache, warmed at startup and refreshed stale-while-
+# revalidate style. Building the catalog fans out to the ontology (one /graph
+# call at ~20s+ against the remote metadata store, plus one detail fetch per
+# type), so a full rebuild NEVER happens on the request path:
+#
+#   * startup       — warm_catalog() kicks off a background build; until it
+#                     lands, /tables answers 503 (only the process's first
+#                     minute or so).
+#   * within TTL    — cache hit, served as-is.
+#   * past TTL      — the *stale* catalog is returned immediately and a
+#                     single-flight background thread rebuilds it; a failed
+#                     refresh keeps the stale copy and logs a warning.
+_CATALOG_TTL_SECONDS = 600.0
+# (expires_monotonic, tables); never replaced with a worse value once set.
 _catalog_cache: tuple[float, list[Table]] | None = None
+# Single-flight guard: at most one background refresh at a time.
+_refresh_lock = threading.Lock()
+_refresh_inflight = False
+
+
+def _build_catalog() -> list[Table]:
+    """Full catalog build (the expensive fan-out). Runs only on background
+    threads; propagates httpx errors to the refresh wrapper."""
+    # One graph call carries display_name / property_count / instance_count
+    # for every type — no instance rows are pulled here.
+    graph = ontology_service.graph()
+    tables = []
+    for node in graph.get("nodes", []):
+        label = node["display_name"]
+        # The graph has no description; keep the existing fallback wording.
+        tables.append(
+            Table(
+                name=node["api_name"],
+                label=label,
+                desc=f"本体对象类型「{label}」",
+                columns=_columns_for(node["id"]),
+                rows=[],
+                row_count=node.get("instance_count"),
+            )
+        )
+    return tables
+
+
+def _refresh_catalog() -> None:
+    """Background rebuild. On success the cache is swapped with a fresh expiry
+    (stamped *after* the build — it can take longer than a short TTL itself);
+    on failure the previous (possibly stale) cache is kept."""
+    global _catalog_cache, _refresh_inflight
+    try:
+        tables = _build_catalog()
+        _catalog_cache = (time.monotonic() + _CATALOG_TTL_SECONDS, tables)
+        logger.info("catalog refreshed: %d object types", len(tables))
+    except Exception as exc:  # noqa: BLE001 - keep serving stale on any failure
+        logger.warning("catalog refresh failed (serving stale if available): %s", exc)
+    finally:
+        with _refresh_lock:
+            _refresh_inflight = False
+
+
+def _spawn_refresh() -> None:
+    """Start a background catalog refresh unless one is already in flight."""
+    global _refresh_inflight
+    with _refresh_lock:
+        if _refresh_inflight:
+            return
+        _refresh_inflight = True
+    threading.Thread(target=_refresh_catalog, name="catalog-refresh", daemon=True).start()
+
+
+def warm_catalog() -> None:
+    """Kick off the initial catalog build in the background. Called from the
+    service lifespan so the first user request lands on a warm cache."""
+    if _catalog_cache is None:
+        _spawn_refresh()
 
 
 class OntologyProvider:
     def list_tables(self) -> list[Table]:
-        global _catalog_cache
-        now = time.monotonic()
-        if _catalog_cache is not None and now < _catalog_cache[0]:
-            return _catalog_cache[1]
-        try:
-            # One graph call carries display_name / property_count /
-            # instance_count for every type — no instance rows are pulled here.
-            graph = ontology_service.graph()
-        except httpx.HTTPError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "本体服务不可用") from exc
-        tables = []
-        for node in graph.get("nodes", []):
-            label = node["display_name"]
-            # The graph has no description; keep the existing fallback wording.
-            tables.append(
-                Table(
-                    name=node["api_name"],
-                    label=label,
-                    desc=f"本体对象类型「{label}」",
-                    columns=_columns_for(node["id"]),
-                    rows=[],
-                    row_count=node.get("instance_count"),
-                )
-            )
-        _catalog_cache = (now + _CATALOG_TTL_SECONDS, tables)
-        return tables
+        cache = _catalog_cache
+        if cache is not None:
+            if time.monotonic() >= cache[0]:
+                # Expired: serve the stale copy now, refresh in the background.
+                _spawn_refresh()
+            return cache[1]
+        # Cold start and the warmup hasn't landed yet: make sure a build is in
+        # flight, but never block the request on the full fan-out.
+        _spawn_refresh()
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "分析目录预热中，请稍后重试")
 
     def get_table(self, name: str) -> Table:
         try:

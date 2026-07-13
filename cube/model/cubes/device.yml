@@ -1,0 +1,43 @@
+# Generated from ontology object type 'device'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: device
+    sql: SELECT * FROM read_parquet('/data/raw/devices.parquet')
+
+    joins:
+      - name: employee
+        sql: "{CUBE}.user_employee_id = {employee}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: asset_tag
+        sql: asset_tag
+        type: string
+      - name: type
+        sql: type
+        type: string
+      - name: brand
+        sql: brand
+        type: string
+      - name: user_employee_id
+        sql: user_employee_id
+        type: number
+      - name: status
+        sql: status
+        type: string
+      - name: purchased_at
+        sql: purchased_at
+        type: time
+
+    measures:
+      - name: ops_device_active_rate
+        title: 设备在用率
+        type: number
+        sql: "ROUND(100.0 * COUNT(*) FILTER (WHERE {CUBE}.status = '在用') / COUNT(*), 1)"
+      - name: ops_device_active_rate_matched
+        title: 设备在用率·命中行数
+        type: count

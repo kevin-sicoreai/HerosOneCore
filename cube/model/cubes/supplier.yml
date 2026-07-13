@@ -1,0 +1,29 @@
+# Generated from ontology object type 'supplier'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: supplier
+    sql: SELECT * FROM read_parquet('/data/raw/suppliers.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: category
+        sql: category
+        type: string
+      - name: city
+        sql: city
+        type: string
+      - name: contact_name
+        sql: contact_name
+        type: string
+      - name: rating
+        sql: rating
+        type: number
+      - name: created_at
+        sql: created_at
+        type: time

@@ -1,8 +1,8 @@
-# Generated from ontology object type 'employee'. Do not edit by hand —
+# Generated from ontology object type 'fixed_asset'. Do not edit by hand —
 # regenerate with `python -m app.tools.generate_cube_schema`.
 cubes:
-  - name: employee
-    sql: SELECT * FROM read_parquet('/data/raw/employees.parquet')
+  - name: fixed_asset
+    sql: SELECT * FROM read_parquet('/data/raw/fixed_assets.parquet')
 
     joins:
       - name: department
@@ -14,21 +14,27 @@ cubes:
         sql: id
         type: number
         primary_key: true
+      - name: asset_no
+        sql: asset_no
+        type: string
       - name: name
         sql: name
+        type: string
+      - name: category
+        sql: category
         type: string
       - name: department_id
         sql: department_id
         type: number
-      - name: position
-        sql: position
-        type: string
-      - name: hired_at
-        sql: hired_at
+      - name: purchase_date
+        sql: purchase_date
         type: time
+      - name: original_value
+        sql: original_value
+        type: number
+      - name: net_value
+        sql: net_value
+        type: number
       - name: status
         sql: status
-        type: string
-      - name: city
-        sql: city
         type: string

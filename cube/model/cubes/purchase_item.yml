@@ -1,0 +1,34 @@
+# Generated from ontology object type 'purchase_item'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: purchase_item
+    sql: SELECT * FROM read_parquet('/data/raw/purchase_items.parquet')
+
+    joins:
+      - name: product
+        sql: "{CUBE}.product_id = {product}.id"
+        relationship: many_to_one
+      - name: purchase
+        sql: "{CUBE}.purchase_id = {purchase}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: purchase_id
+        sql: purchase_id
+        type: number
+      - name: product_id
+        sql: product_id
+        type: number
+      - name: quantity
+        sql: quantity
+        type: number
+      - name: unit_cost
+        sql: unit_cost
+        type: number
+      - name: amount
+        sql: amount
+        type: number

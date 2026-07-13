@@ -1,0 +1,23 @@
+# Generated from ontology object type 'channel'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: channel
+    sql: SELECT * FROM read_parquet('/data/raw/channels.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: type
+        sql: type
+        type: string
+      - name: region
+        sql: region
+        type: string
+      - name: manager
+        sql: manager
+        type: string

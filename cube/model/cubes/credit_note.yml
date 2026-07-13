@@ -1,0 +1,31 @@
+# Generated from ontology object type 'credit_note'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: credit_note
+    sql: SELECT * FROM read_parquet('/data/raw/credit_notes.parquet')
+
+    joins:
+      - name: invoice
+        sql: "{CUBE}.invoice_id = {invoice}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: note_no
+        sql: note_no
+        type: string
+      - name: invoice_id
+        sql: invoice_id
+        type: number
+      - name: amount
+        sql: amount
+        type: number
+      - name: reason
+        sql: reason
+        type: string
+      - name: issued_at
+        sql: issued_at
+        type: time

@@ -1,0 +1,34 @@
+# Generated from ontology object type 'batch'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: batch
+    sql: SELECT * FROM read_parquet('/data/raw/batches.parquet')
+
+    joins:
+      - name: product
+        sql: "{CUBE}.product_id = {product}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: batch_no
+        sql: batch_no
+        type: string
+      - name: product_id
+        sql: product_id
+        type: number
+      - name: quantity
+        sql: quantity
+        type: number
+      - name: produced_at
+        sql: produced_at
+        type: time
+      - name: expiry_date
+        sql: expiry_date
+        type: time
+      - name: status
+        sql: status
+        type: string

@@ -1,0 +1,34 @@
+# Generated from ontology object type 'quote'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: quote
+    sql: SELECT * FROM read_parquet('/data/raw/quotes.parquet')
+
+    joins:
+      - name: customer
+        sql: "{CUBE}.customer_id = {customer}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: quote_no
+        sql: quote_no
+        type: string
+      - name: customer_id
+        sql: customer_id
+        type: number
+      - name: total_amount
+        sql: total_amount
+        type: number
+      - name: status
+        sql: status
+        type: string
+      - name: valid_until
+        sql: valid_until
+        type: time
+      - name: created_at
+        sql: created_at
+        type: time

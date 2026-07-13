@@ -1,0 +1,46 @@
+# Generated from ontology object type 'order'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: order
+    sql: SELECT * FROM read_parquet('/data/raw/orders.parquet')
+
+    joins:
+      - name: sales_rep
+        sql: "{CUBE}.sales_rep_id = {sales_rep}.id"
+        relationship: many_to_one
+      - name: customer
+        sql: "{CUBE}.customer_id = {customer}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: order_no
+        sql: order_no
+        type: string
+      - name: customer_id
+        sql: customer_id
+        type: number
+      - name: sales_rep_id
+        sql: sales_rep_id
+        type: number
+      - name: order_date
+        sql: order_date
+        type: time
+      - name: status
+        sql: status
+        type: string
+      - name: item_count
+        sql: item_count
+        type: number
+
+    measures:
+      - name: ops_order_amount
+        title: 订单销售额
+        type: sum
+        sql: total_amount
+      - name: ops_order_amount_matched
+        title: 订单销售额·命中行数
+        type: count

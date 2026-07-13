@@ -1,0 +1,31 @@
+# Generated from ontology object type 'quality_check'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: quality_check
+    sql: SELECT * FROM read_parquet('/data/raw/quality_checks.parquet')
+
+    joins:
+      - name: batch
+        sql: "{CUBE}.batch_id = {batch}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: batch_id
+        sql: batch_id
+        type: number
+      - name: check_date
+        sql: check_date
+        type: time
+      - name: inspector
+        sql: inspector
+        type: string
+      - name: result
+        sql: result
+        type: string
+      - name: defect_rate
+        sql: defect_rate
+        type: number

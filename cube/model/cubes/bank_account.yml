@@ -1,0 +1,26 @@
+# Generated from ontology object type 'bank_account'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: bank_account
+    sql: SELECT * FROM read_parquet('/data/raw/bank_accounts.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: account_no
+        sql: account_no
+        type: string
+      - name: bank_name
+        sql: bank_name
+        type: string
+      - name: currency
+        sql: currency
+        type: string
+      - name: balance
+        sql: balance
+        type: number
+      - name: type
+        sql: type
+        type: string

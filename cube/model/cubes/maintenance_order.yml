@@ -1,0 +1,45 @@
+# Generated from ontology object type 'maintenance_order'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: maintenance_order
+    sql: SELECT * FROM read_parquet('/data/raw/maintenance_orders.parquet')
+
+    joins:
+      - name: device
+        sql: "{CUBE}.device_id = {device}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: order_no
+        sql: order_no
+        type: string
+      - name: device_id
+        sql: device_id
+        type: number
+      - name: issue
+        sql: issue
+        type: string
+      - name: status
+        sql: status
+        type: string
+      - name: cost
+        sql: cost
+        type: number
+      - name: created_at
+        sql: created_at
+        type: time
+      - name: finished_at
+        sql: finished_at
+        type: time
+
+    measures:
+      - name: ops_maintenance_count
+        title: 维保工单数
+        type: count
+      - name: ops_maintenance_count_matched
+        title: 维保工单数·命中行数
+        type: count

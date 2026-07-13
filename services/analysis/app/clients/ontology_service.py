@@ -16,7 +16,21 @@ import httpx
 
 from app.core.config import settings
 
-_TIMEOUT = 8.0
+# With the ontology metadata store on a remote Postgres (Thor), its /graph
+# endpoint computes an instance_count per object type and takes ~20s+ cold —
+# well past the old 8s default, which surfaced as a stable 503 "本体服务不可用"
+# on /tables. Generous default; override via ONTOLOGY_CLIENT_TIMEOUT.
+_TIMEOUT = float(os.environ.get("ONTOLOGY_CLIENT_TIMEOUT", "60"))
+
+# Process-wide TTL caches for the catalog reads every /tables page load fans out
+# to (graph + object-type summaries). Mirrors the 30s caches in
+# repositories/object_rows.py, with a longer TTL because the backing /graph call
+# is the expensive one. Only successful responses are cached, so transport
+# errors still propagate to callers on every attempt.
+_CACHE_TTL_SECONDS = 60.0
+# (expires_monotonic, payload)
+_graph_cache: tuple[float, dict[str, Any]] | None = None
+_types_cache: tuple[float, list[dict[str, Any]]] | None = None
 
 # Analysis is a trusted data-plane service: it self-mints a short-lived service
 # token so the ontology grants it the *unmasked* values (e.g. monthly_salary,
@@ -53,9 +67,17 @@ def _base() -> str:
 
 
 def list_object_types() -> list[dict[str, Any]]:
+    """Object-type summaries, cached for a short TTL (hit on every
+    /tables/{name} resolution and throughout the metric layer)."""
+    global _types_cache
+    now = time.monotonic()
+    if _types_cache is not None and now < _types_cache[0]:
+        return _types_cache[1]
     resp = httpx.get(f"{_base()}/object-types", headers=_service_headers(), timeout=_TIMEOUT)
     resp.raise_for_status()
-    return resp.json()
+    payload = resp.json()
+    _types_cache = (now + _CACHE_TTL_SECONDS, payload)
+    return payload
 
 
 def get_object_type(object_type_id: str) -> dict[str, Any]:
@@ -70,11 +92,19 @@ def get_object_type(object_type_id: str) -> dict[str, Any]:
 def graph() -> dict[str, Any]:
     """Ontology graph (nodes + links). Each node carries api_name /
     display_name / property_count / instance_count, so the analysis catalog can
-    be built without pulling any instance rows (instance_count is a cheap COUNT
-    on the ontology side, not a full row scan)."""
+    be built without pulling any instance rows. Cached for a short TTL: the
+    ontology recomputes instance_count per type on every call, which is ~20s+
+    against the remote metadata store, so uncached repeated page loads would
+    stall the analysis workbench."""
+    global _graph_cache
+    now = time.monotonic()
+    if _graph_cache is not None and now < _graph_cache[0]:
+        return _graph_cache[1]
     resp = httpx.get(f"{_base()}/graph", headers=_service_headers(), timeout=_TIMEOUT)
     resp.raise_for_status()
-    return resp.json()
+    payload = resp.json()
+    _graph_cache = (now + _CACHE_TTL_SECONDS, payload)
+    return payload
 
 
 def list_objects(object_type_id: str, limit: int) -> dict[str, Any]:

@@ -1,0 +1,23 @@
+# Generated from ontology object type 'carrier'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: carrier
+    sql: SELECT * FROM read_parquet('/data/raw/carriers.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: type
+        sql: type
+        type: string
+      - name: rating
+        sql: rating
+        type: number
+      - name: contact_phone
+        sql: contact_phone
+        type: string

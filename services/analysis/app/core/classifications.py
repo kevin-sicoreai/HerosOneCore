@@ -22,8 +22,12 @@ import time
 import httpx
 
 from app.clients import ontology_service
+from app.core.auth import service_headers
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.repositories import object_rows
+
+logger = get_logger("classifications")
 
 # 127.0.0.1 (not "localhost") avoids a slow IPv6 resolution attempt on Windows.
 _GOVERNANCE_URL = os.environ.get("GOVERNANCE_API_URL", "http://127.0.0.1:8004")
@@ -40,10 +44,19 @@ def _all_classifications() -> list[dict]:
     if _cls_cache["rows"] and now - _cls_cache["at"] < _CACHE_TTL_SECONDS:
         return _cls_cache["rows"]
     try:
-        resp = httpx.get(f"{_GOVERNANCE_URL}/classifications", timeout=5.0)
+        # Governance gates all reads behind a validly-signed shared-secret token,
+        # so send this service's internal token (an anonymous GET 401s and would
+        # silently disable masking — the failure mode this warning guards).
+        resp = httpx.get(
+            f"{_GOVERNANCE_URL}/classifications", headers=service_headers(), timeout=5.0
+        )
         resp.raise_for_status()
         rows = resp.json()
-    except Exception:  # noqa: BLE001 - fail open: no governance -> no masking
+    except Exception as exc:  # noqa: BLE001 - fail open: no governance -> no masking
+        logger.warning(
+            "classifications fetch failed (%s) — masking disabled until governance recovers",
+            exc,
+        )
         rows = []
     _cls_cache["at"] = now
     _cls_cache["rows"] = rows
@@ -63,7 +76,8 @@ def _dataset_name(dataset_id: str) -> str | None:
         )
         resp.raise_for_status()
         name = resp.json().get("name")
-    except Exception:  # noqa: BLE001 - fail open
+    except Exception as exc:  # noqa: BLE001 - fail open
+        logger.warning("dataset name lookup failed for %s (%s)", dataset_id, exc)
         name = None
     _dataset_name_cache[dataset_id] = (now + _CACHE_TTL_SECONDS, name)
     return name

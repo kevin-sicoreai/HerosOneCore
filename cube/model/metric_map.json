@@ -1,66 +1,41 @@
 {
-  "hr_headcount": {
-    "base_cube": "employee",
-    "measure": "employee.hr_headcount",
-    "matched_measure": "employee.hr_headcount_matched",
+  "ops_ticket_count": {
+    "base_cube": "support_ticket",
+    "measure": "support_ticket.ops_ticket_count",
+    "matched_measure": "support_ticket.ops_ticket_count_matched",
     "dimensions": {
-      "dept_name": "department.name",
-      "city": "employee.city",
-      "position_level": "position.level"
+      "status": "support_ticket.status",
+      "priority": "support_ticket.priority",
+      "category": "support_ticket.category"
     }
   },
-  "hr_attrition_rate": {
-    "base_cube": "employee",
-    "measure": "employee.hr_attrition_rate",
-    "matched_measure": "employee.hr_attrition_rate_matched",
+  "ops_ticket_satisfaction": {
+    "base_cube": "support_ticket",
+    "measure": "support_ticket.ops_ticket_satisfaction",
+    "matched_measure": "support_ticket.ops_ticket_satisfaction_matched",
+    "dimensions": {}
+  },
+  "ops_order_amount": {
+    "base_cube": "order",
+    "measure": "order.ops_order_amount",
+    "matched_measure": "order.ops_order_amount_matched",
     "dimensions": {
-      "dept_name": "department.name",
-      "city": "employee.city"
+      "status": "order.status"
     }
   },
-  "hr_avg_salary": {
-    "base_cube": "employee",
-    "measure": "employee.hr_avg_salary",
-    "matched_measure": "employee.hr_avg_salary_matched",
-    "dimensions": {
-      "dept_name": "department.name",
-      "city": "employee.city",
-      "position_level": "position.level"
-    }
+  "ops_device_active_rate": {
+    "base_cube": "device",
+    "measure": "device.ops_device_active_rate",
+    "matched_measure": "device.ops_device_active_rate_matched",
+    "dimensions": {}
   },
-  "hr_headcount_plan": {
-    "base_cube": "department",
-    "measure": "department.hr_headcount_plan",
-    "matched_measure": "department.hr_headcount_plan_matched",
+  "ops_maintenance_count": {
+    "base_cube": "maintenance_order",
+    "measure": "maintenance_order.ops_maintenance_count",
+    "matched_measure": "maintenance_order.ops_maintenance_count_matched",
     "dimensions": {
-      "city": "department.city",
-      "dept_name": "department.name"
-    }
-  },
-  "hr_perf_score": {
-    "base_cube": "performance_review",
-    "measure": "performance_review.hr_perf_score",
-    "matched_measure": "performance_review.hr_perf_score_matched",
-    "dimensions": {
-      "cycle": "performance_review.cycle",
-      "department_name": "performance_review.department_name"
-    }
-  },
-  "hr_application_count": {
-    "base_cube": "application",
-    "measure": "application.hr_application_count",
-    "matched_measure": "application.hr_application_count_matched",
-    "dimensions": {
-      "stage": "application.stage",
-      "source": "application.source"
-    }
-  },
-  "hr_training_count": {
-    "base_cube": "training_record",
-    "measure": "training_record.hr_training_count",
-    "matched_measure": "training_record.hr_training_count_matched",
-    "dimensions": {
-      "result": "training_record.result"
+      "status": "maintenance_order.status",
+      "issue": "maintenance_order.issue"
     }
   }
 }

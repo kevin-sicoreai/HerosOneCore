@@ -1,0 +1,40 @@
+# Generated from ontology object type 'expense'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: expense
+    sql: SELECT * FROM read_parquet('/data/raw/expenses.parquet')
+
+    joins:
+      - name: department
+        sql: "{CUBE}.department_id = {department}.id"
+        relationship: many_to_one
+      - name: employee
+        sql: "{CUBE}.employee_id = {employee}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: expense_no
+        sql: expense_no
+        type: string
+      - name: employee_id
+        sql: employee_id
+        type: number
+      - name: department_id
+        sql: department_id
+        type: number
+      - name: category
+        sql: category
+        type: string
+      - name: amount
+        sql: amount
+        type: number
+      - name: expense_date
+        sql: expense_date
+        type: time
+      - name: status
+        sql: status
+        type: string

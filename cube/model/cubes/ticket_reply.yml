@@ -1,0 +1,28 @@
+# Generated from ontology object type 'ticket_reply'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: ticket_reply
+    sql: SELECT * FROM read_parquet('/data/raw/ticket_replies.parquet')
+
+    joins:
+      - name: support_ticket
+        sql: "{CUBE}.ticket_id = {support_ticket}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: ticket_id
+        sql: ticket_id
+        type: number
+      - name: replier
+        sql: replier
+        type: string
+      - name: reply_at
+        sql: reply_at
+        type: time
+      - name: channel
+        sql: channel
+        type: string

@@ -1,8 +1,8 @@
-# Generated from ontology object type 'employee'. Do not edit by hand —
+# Generated from ontology object type 'sales_rep'. Do not edit by hand —
 # regenerate with `python -m app.tools.generate_cube_schema`.
 cubes:
-  - name: employee
-    sql: SELECT * FROM read_parquet('/data/raw/employees.parquet')
+  - name: sales_rep
+    sql: SELECT * FROM read_parquet('/data/raw/sales_reps.parquet')
 
     joins:
       - name: department
@@ -20,15 +20,12 @@ cubes:
       - name: department_id
         sql: department_id
         type: number
-      - name: position
-        sql: position
+      - name: region
+        sql: region
         type: string
       - name: hired_at
         sql: hired_at
         type: time
-      - name: status
-        sql: status
-        type: string
-      - name: city
-        sql: city
-        type: string
+      - name: quota_annual
+        sql: quota_annual
+        type: number

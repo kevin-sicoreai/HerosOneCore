@@ -1,0 +1,34 @@
+# Generated from ontology object type 'visit'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: visit
+    sql: SELECT * FROM read_parquet('/data/raw/visits.parquet')
+
+    joins:
+      - name: sales_rep
+        sql: "{CUBE}.sales_rep_id = {sales_rep}.id"
+        relationship: many_to_one
+      - name: customer
+        sql: "{CUBE}.customer_id = {customer}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: customer_id
+        sql: customer_id
+        type: number
+      - name: sales_rep_id
+        sql: sales_rep_id
+        type: number
+      - name: visit_date
+        sql: visit_date
+        type: time
+      - name: purpose
+        sql: purpose
+        type: string
+      - name: outcome
+        sql: outcome
+        type: string

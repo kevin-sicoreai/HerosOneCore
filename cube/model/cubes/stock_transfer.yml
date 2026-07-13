@@ -1,0 +1,37 @@
+# Generated from ontology object type 'stock_transfer'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: stock_transfer
+    sql: SELECT * FROM read_parquet('/data/raw/stock_transfers.parquet')
+
+    joins:
+      - name: warehouse
+        sql: "{CUBE}.from_warehouse_id = {warehouse}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: transfer_no
+        sql: transfer_no
+        type: string
+      - name: from_warehouse_id
+        sql: from_warehouse_id
+        type: number
+      - name: to_warehouse_id
+        sql: to_warehouse_id
+        type: number
+      - name: product_id
+        sql: product_id
+        type: number
+      - name: quantity
+        sql: quantity
+        type: number
+      - name: status
+        sql: status
+        type: string
+      - name: created_at
+        sql: created_at
+        type: time

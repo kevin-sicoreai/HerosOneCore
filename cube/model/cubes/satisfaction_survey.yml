@@ -1,0 +1,28 @@
+# Generated from ontology object type 'satisfaction_survey'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: satisfaction_survey
+    sql: SELECT * FROM read_parquet('/data/raw/satisfaction_surveys.parquet')
+
+    joins:
+      - name: support_ticket
+        sql: "{CUBE}.ticket_id = {support_ticket}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: ticket_id
+        sql: ticket_id
+        type: number
+      - name: score
+        sql: score
+        type: number
+      - name: comment_tag
+        sql: comment_tag
+        type: string
+      - name: surveyed_at
+        sql: surveyed_at
+        type: time

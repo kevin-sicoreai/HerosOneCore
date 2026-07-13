@@ -1,0 +1,37 @@
+# Generated from ontology object type 'project_task'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: project_task
+    sql: SELECT * FROM read_parquet('/data/raw/project_tasks.parquet')
+
+    joins:
+      - name: employee
+        sql: "{CUBE}.assignee_id = {employee}.id"
+        relationship: many_to_one
+      - name: project
+        sql: "{CUBE}.project_id = {project}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: project_id
+        sql: project_id
+        type: number
+      - name: name
+        sql: name
+        type: string
+      - name: assignee_id
+        sql: assignee_id
+        type: number
+      - name: due_date
+        sql: due_date
+        type: time
+      - name: status
+        sql: status
+        type: string
+      - name: priority
+        sql: priority
+        type: string

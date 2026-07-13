@@ -1,0 +1,31 @@
+# Generated from ontology object type 'energy_record'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: energy_record
+    sql: SELECT * FROM read_parquet('/data/raw/energy_consumption.parquet')
+
+    joins:
+      - name: warehouse
+        sql: "{CUBE}.warehouse_id = {warehouse}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: warehouse_id
+        sql: warehouse_id
+        type: number
+      - name: period_date
+        sql: period_date
+        type: time
+      - name: electricity_kwh
+        sql: electricity_kwh
+        type: number
+      - name: water_ton
+        sql: water_ton
+        type: number
+      - name: cost
+        sql: cost
+        type: number

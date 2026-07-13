@@ -1,0 +1,29 @@
+# Generated from ontology object type 'software_license'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: software_license
+    sql: SELECT * FROM read_parquet('/data/raw/software_licenses.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: vendor
+        sql: vendor
+        type: string
+      - name: seats
+        sql: seats
+        type: number
+      - name: seats_used
+        sql: seats_used
+        type: number
+      - name: expires_at
+        sql: expires_at
+        type: time
+      - name: annual_cost
+        sql: annual_cost
+        type: number

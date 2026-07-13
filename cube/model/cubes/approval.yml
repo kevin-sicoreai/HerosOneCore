@@ -1,0 +1,37 @@
+# Generated from ontology object type 'approval'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: approval
+    sql: SELECT * FROM read_parquet('/data/raw/approvals.parquet')
+
+    joins:
+      - name: employee
+        sql: "{CUBE}.applicant_id = {employee}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: approval_no
+        sql: approval_no
+        type: string
+      - name: type
+        sql: type
+        type: string
+      - name: applicant_id
+        sql: applicant_id
+        type: number
+      - name: amount
+        sql: amount
+        type: number
+      - name: status
+        sql: status
+        type: string
+      - name: submitted_at
+        sql: submitted_at
+        type: time
+      - name: approved_at
+        sql: approved_at
+        type: time

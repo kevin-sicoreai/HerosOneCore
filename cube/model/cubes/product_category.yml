@@ -1,0 +1,17 @@
+# Generated from ontology object type 'product_category'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: product_category
+    sql: SELECT * FROM read_parquet('/data/raw/product_categories.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: parent_name
+        sql: parent_name
+        type: string

@@ -1,0 +1,61 @@
+# Generated from ontology object type 'support_ticket'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: support_ticket
+    sql: SELECT * FROM read_parquet('/data/raw/support_tickets.parquet')
+
+    joins:
+      - name: order
+        sql: "{CUBE}.order_id = {order}.id"
+        relationship: many_to_one
+      - name: customer
+        sql: "{CUBE}.customer_id = {customer}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: ticket_no
+        sql: ticket_no
+        type: string
+      - name: customer_id
+        sql: customer_id
+        type: number
+      - name: order_id
+        sql: order_id
+        type: number
+      - name: category
+        sql: category
+        type: string
+      - name: priority
+        sql: priority
+        type: string
+      - name: status
+        sql: status
+        type: string
+      - name: created_at
+        sql: created_at
+        type: time
+      - name: resolved_at
+        sql: resolved_at
+        type: time
+      - name: satisfaction
+        sql: satisfaction
+        type: number
+
+    measures:
+      - name: ops_ticket_count
+        title: 工单总数
+        type: count
+      - name: ops_ticket_count_matched
+        title: 工单总数·命中行数
+        type: count
+      - name: ops_ticket_satisfaction
+        title: 平均满意度
+        type: avg
+        sql: satisfaction
+      - name: ops_ticket_satisfaction_matched
+        title: 平均满意度·命中行数
+        type: count

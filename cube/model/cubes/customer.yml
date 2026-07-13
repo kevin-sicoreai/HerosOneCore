@@ -1,0 +1,32 @@
+# Generated from ontology object type 'customer'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: customer
+    sql: SELECT * FROM read_parquet('/data/raw/customers.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: industry
+        sql: industry
+        type: string
+      - name: region
+        sql: region
+        type: string
+      - name: city
+        sql: city
+        type: string
+      - name: tier
+        sql: tier
+        type: string
+      - name: contact_name
+        sql: contact_name
+        type: string
+      - name: created_at
+        sql: created_at
+        type: time

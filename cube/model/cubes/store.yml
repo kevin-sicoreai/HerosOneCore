@@ -1,0 +1,29 @@
+# Generated from ontology object type 'store'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: store
+    sql: SELECT * FROM read_parquet('/data/raw/stores.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: city
+        sql: city
+        type: string
+      - name: region
+        sql: region
+        type: string
+      - name: manager
+        sql: manager
+        type: string
+      - name: opened_at
+        sql: opened_at
+        type: time
+      - name: area_sqm
+        sql: area_sqm
+        type: number

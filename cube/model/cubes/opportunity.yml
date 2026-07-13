@@ -1,0 +1,43 @@
+# Generated from ontology object type 'opportunity'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: opportunity
+    sql: SELECT * FROM read_parquet('/data/raw/opportunities.parquet')
+
+    joins:
+      - name: sales_rep
+        sql: "{CUBE}.owner_rep_id = {sales_rep}.id"
+        relationship: many_to_one
+      - name: customer
+        sql: "{CUBE}.customer_id = {customer}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: customer_id
+        sql: customer_id
+        type: number
+      - name: stage
+        sql: stage
+        type: string
+      - name: amount
+        sql: amount
+        type: number
+      - name: probability
+        sql: probability
+        type: number
+      - name: owner_rep_id
+        sql: owner_rep_id
+        type: number
+      - name: expected_close
+        sql: expected_close
+        type: time
+      - name: created_at
+        sql: created_at
+        type: time

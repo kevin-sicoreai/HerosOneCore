@@ -12,22 +12,30 @@ import threading
 import httpx
 
 from app.core.auth import service_headers
+from app.core.logging import get_logger
 
 _GOVERNANCE_URL = os.environ.get("GOVERNANCE_API_URL", "http://127.0.0.1:8004")
 _SOURCE = "analysis"
 
+logger = get_logger("audit")
+
 
 def _post_event(payload: dict) -> None:
-    """POST one audit event; best-effort, swallow every error. Runs in a daemon thread."""
+    """POST one audit event; best-effort, swallow every error. Runs in a daemon thread.
+
+    Failures (including auth rejections) are logged: a silently-dropped audit
+    trail looks identical to a healthy one otherwise.
+    """
     try:
-        httpx.post(
+        resp = httpx.post(
             f"{_GOVERNANCE_URL}/audit-events",
             json=payload,
             headers=service_headers(),
             timeout=5,
         )
-    except Exception:  # noqa: BLE001 - audit is best-effort
-        pass
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 - audit is best-effort
+        logger.warning("audit event dropped (%s): %s", payload.get("action"), exc)
 
 
 def _dispatch(payload: dict) -> None:

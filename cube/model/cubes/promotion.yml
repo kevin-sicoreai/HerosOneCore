@@ -1,0 +1,29 @@
+# Generated from ontology object type 'promotion'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: promotion
+    sql: SELECT * FROM read_parquet('/data/raw/promotions.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: type
+        sql: type
+        type: string
+      - name: discount_pct
+        sql: discount_pct
+        type: number
+      - name: start_date
+        sql: start_date
+        type: time
+      - name: end_date
+        sql: end_date
+        type: time
+      - name: status
+        sql: status
+        type: string

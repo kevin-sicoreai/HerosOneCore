@@ -1,0 +1,34 @@
+# Generated from ontology object type 'supplier_evaluation'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: supplier_evaluation
+    sql: SELECT * FROM read_parquet('/data/raw/supplier_evaluations.parquet')
+
+    joins:
+      - name: supplier
+        sql: "{CUBE}.supplier_id = {supplier}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: supplier_id
+        sql: supplier_id
+        type: number
+      - name: period
+        sql: period
+        type: string
+      - name: quality_score
+        sql: quality_score
+        type: number
+      - name: delivery_score
+        sql: delivery_score
+        type: number
+      - name: price_score
+        sql: price_score
+        type: number
+      - name: total_score
+        sql: total_score
+        type: number

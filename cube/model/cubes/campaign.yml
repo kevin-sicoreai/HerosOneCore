@@ -1,0 +1,32 @@
+# Generated from ontology object type 'campaign'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: campaign
+    sql: SELECT * FROM read_parquet('/data/raw/campaigns.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: channel
+        sql: channel
+        type: string
+      - name: budget
+        sql: budget
+        type: number
+      - name: start_date
+        sql: start_date
+        type: time
+      - name: end_date
+        sql: end_date
+        type: time
+      - name: status
+        sql: status
+        type: string
+      - name: leads_target
+        sql: leads_target
+        type: number

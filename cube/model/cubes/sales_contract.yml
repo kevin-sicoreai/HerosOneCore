@@ -1,0 +1,37 @@
+# Generated from ontology object type 'sales_contract'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: sales_contract
+    sql: SELECT * FROM read_parquet('/data/raw/sales_contracts.parquet')
+
+    joins:
+      - name: customer
+        sql: "{CUBE}.customer_id = {customer}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: contract_no
+        sql: contract_no
+        type: string
+      - name: customer_id
+        sql: customer_id
+        type: number
+      - name: amount
+        sql: amount
+        type: number
+      - name: signed_at
+        sql: signed_at
+        type: time
+      - name: start_date
+        sql: start_date
+        type: time
+      - name: end_date
+        sql: end_date
+        type: time
+      - name: status
+        sql: status
+        type: string

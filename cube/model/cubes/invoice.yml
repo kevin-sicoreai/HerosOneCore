@@ -1,0 +1,31 @@
+# Generated from ontology object type 'invoice'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: invoice
+    sql: SELECT * FROM read_parquet('/data/raw/invoices.parquet')
+
+    joins:
+      - name: order
+        sql: "{CUBE}.order_id = {order}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: invoice_no
+        sql: invoice_no
+        type: string
+      - name: order_id
+        sql: order_id
+        type: number
+      - name: issued_at
+        sql: issued_at
+        type: time
+      - name: due_date
+        sql: due_date
+        type: time
+      - name: status
+        sql: status
+        type: string

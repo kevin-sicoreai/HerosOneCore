@@ -9,6 +9,7 @@ from app.api import analyses, analysis, metrics
 from app.core.config import settings
 from app.core.db import init_db
 from app.core.logging import configure_logging, get_logger
+from app.repositories import provider
 from app.services import metric_defs
 
 configure_logging()
@@ -26,6 +27,10 @@ async def lifespan(app: FastAPI):
         metric_defs.seed_from_registry()
     except Exception as exc:  # noqa: BLE001 - seeding must never fail startup
         logger.warning("metric seed failed: %s", exc)
+    # Warm the table catalog in the background: the full build fans out to the
+    # ontology (~30s against the remote store) and must never run on the
+    # request path, so kick it off before the first user request arrives.
+    provider.warm_catalog()
     logger.info("analysis service ready (db=%s)", settings.database_url)
     yield
 

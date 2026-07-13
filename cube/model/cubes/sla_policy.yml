@@ -1,0 +1,23 @@
+# Generated from ontology object type 'sla_policy'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: sla_policy
+    sql: SELECT * FROM read_parquet('/data/raw/sla_policies.parquet')
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: name
+        sql: name
+        type: string
+      - name: priority
+        sql: priority
+        type: string
+      - name: response_hours
+        sql: response_hours
+        type: number
+      - name: resolve_hours
+        sql: resolve_hours
+        type: number

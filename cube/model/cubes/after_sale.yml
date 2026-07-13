@@ -1,0 +1,37 @@
+# Generated from ontology object type 'after_sale'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: after_sale
+    sql: SELECT * FROM read_parquet('/data/raw/after_sales.parquet')
+
+    joins:
+      - name: order
+        sql: "{CUBE}.order_id = {order}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: service_no
+        sql: service_no
+        type: string
+      - name: order_id
+        sql: order_id
+        type: number
+      - name: type
+        sql: type
+        type: string
+      - name: status
+        sql: status
+        type: string
+      - name: cost
+        sql: cost
+        type: number
+      - name: created_at
+        sql: created_at
+        type: time
+      - name: finished_at
+        sql: finished_at
+        type: time

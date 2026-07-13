@@ -1,0 +1,34 @@
+# Generated from ontology object type 'inventory_item'. Do not edit by hand —
+# regenerate with `python -m app.tools.generate_cube_schema`.
+cubes:
+  - name: inventory_item
+    sql: SELECT * FROM read_parquet('/data/raw/inventory.parquet')
+
+    joins:
+      - name: product
+        sql: "{CUBE}.product_id = {product}.id"
+        relationship: many_to_one
+      - name: warehouse
+        sql: "{CUBE}.warehouse_id = {warehouse}.id"
+        relationship: many_to_one
+
+    dimensions:
+      - name: id
+        sql: id
+        type: number
+        primary_key: true
+      - name: warehouse_id
+        sql: warehouse_id
+        type: number
+      - name: product_id
+        sql: product_id
+        type: number
+      - name: quantity
+        sql: quantity
+        type: number
+      - name: safety_stock
+        sql: safety_stock
+        type: number
+      - name: updated_at
+        sql: updated_at
+        type: time
