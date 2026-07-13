@@ -23,10 +23,13 @@ import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
@@ -54,8 +57,54 @@ const MEASURE_AGG = new Set(["sum", "avg", "min", "max"])
 const NUMERIC_RE = /^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL)/i
 const isNumeric = (dataType: string) => NUMERIC_RE.test(dataType.trim())
 
-const inputCls =
-  "w-full rounded-md border border-border bg-background px-2 py-1 text-xs disabled:opacity-60"
+// A native select styled to match the Input component.
+function Select({
+  value,
+  onChange,
+  options,
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+// A labelled form row.
+function Field({
+  label,
+  required,
+  hint,
+  children,
+}: {
+  label: string
+  required?: boolean
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-[13px] font-medium text-foreground">
+        {label}
+        {required && <span className="ml-0.5 text-danger">*</span>}
+      </span>
+      {children}
+      {hint && <span className="text-xs leading-relaxed text-muted-foreground">{hint}</span>}
+    </label>
+  )
+}
 
 // One dimension row in the form. linkId "" = a column on the base type;
 // otherwise the far column reached through the ontology link `linkId`.
@@ -299,7 +348,7 @@ export default function MetricsSemanticsPage() {
       />
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+        <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-2.5 text-sm text-danger">
           {error}
         </div>
       )}
@@ -410,84 +459,67 @@ export default function MetricsSemanticsPage() {
 
       {/* Create / edit drawer */}
       <Sheet open={formOpen} onOpenChange={setFormOpen}>
-        <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-md">
-          <SheetHeader>
+        <SheetContent side="right" className="w-full gap-0 sm:max-w-md">
+          <SheetHeader className="border-b border-border">
             <SheetTitle>{editingKey ? `编辑指标 ${editingKey}` : "新建指标"}</SheetTitle>
             <SheetDescription>
               声明式定义指标口径与维度；保存后自动重新生成 Cube schema。
             </SheetDescription>
           </SheetHeader>
 
-          <div className="space-y-3 px-4 pb-6 text-sm">
+          <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto p-4 text-sm">
             {ontoLoading && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2Icon className="size-3.5 animate-spin" /> 加载本体…
               </div>
             )}
             {formError && (
-              <div className="rounded-md border border-danger/40 bg-danger/10 px-2 py-1.5 text-xs text-danger">
+              <div className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
                 {formError}
               </div>
             )}
 
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[11px] text-muted-foreground">指标 key（英文标识）</span>
-              <input
-                className={inputCls}
+            <Field label="指标 key" hint="英文标识，如 hr_leave_count">
+              <Input
                 value={form.key}
                 disabled={editingKey !== null}
                 placeholder="hr_leave_count"
                 onChange={(e) => setForm({ ...form, key: e.target.value })}
               />
-            </label>
+            </Field>
 
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[11px] text-muted-foreground">名称</span>
-              <input
-                className={inputCls}
+            <Field label="名称">
+              <Input
                 value={form.label}
                 placeholder="请假人次"
                 onChange={(e) => setForm({ ...form, label: e.target.value })}
               />
-            </label>
+            </Field>
 
             <div className="grid grid-cols-2 gap-2">
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[11px] text-muted-foreground">聚合</span>
-                <select
-                  className={inputCls}
+              <Field label="聚合">
+                <Select
                   value={form.agg}
-                  onChange={(e) =>
-                    setForm({ ...form, agg: e.target.value as MetricDefBody["agg"] })
-                  }
-                >
-                  {AGG_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[11px] text-muted-foreground">单位</span>
-                <input
-                  className={inputCls}
+                  onChange={(v) => setForm({ ...form, agg: v as MetricDefBody["agg"] })}
+                  options={AGG_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                />
+              </Field>
+              <Field label="单位">
+                <Input
                   value={form.unit}
                   placeholder="人 / ¥ / %"
                   onChange={(e) => setForm({ ...form, unit: e.target.value })}
                 />
-              </label>
+              </Field>
             </div>
 
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[11px] text-muted-foreground">来源对象</span>
-              <select
-                className={inputCls}
+            <Field label="来源对象">
+              <Select
                 value={form.baseType}
-                onChange={(e) =>
+                onChange={(v) =>
                   setForm({
                     ...form,
-                    baseType: e.target.value,
+                    baseType: v,
                     // Reset columns that depend on the base type.
                     measureColumn: "",
                     numeratorProperty: "",
@@ -495,67 +527,55 @@ export default function MetricsSemanticsPage() {
                     dimensions: [],
                   })
                 }
-              >
-                <option value="">请选择…</option>
-                {(onto?.nodes ?? []).map((n) => (
-                  <option key={n.id} value={n.api_name}>
-                    {n.display_name}（{n.api_name}）
-                  </option>
-                ))}
-              </select>
-            </label>
+                options={[
+                  { value: "", label: "请选择…" },
+                  ...(onto?.nodes ?? []).map((n) => ({
+                    value: n.api_name,
+                    label: `${n.display_name}（${n.api_name}）`,
+                  })),
+                ]}
+              />
+            </Field>
 
             {MEASURE_AGG.has(form.agg) && (
-              <label className="flex flex-col gap-0.5">
-                <span className="text-[11px] text-muted-foreground">度量列（数值属性）</span>
-                <select
-                  className={inputCls}
+              <Field label="度量列" hint="数值属性">
+                <Select
                   value={form.measureColumn}
-                  onChange={(e) => setForm({ ...form, measureColumn: e.target.value })}
-                >
-                  <option value="">请选择…</option>
-                  {numericProps.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  onChange={(v) => setForm({ ...form, measureColumn: v })}
+                  options={[
+                    { value: "", label: "请选择…" },
+                    ...numericProps.map((p) => ({ value: p.name, label: p.name })),
+                  ]}
+                />
+              </Field>
             )}
 
             {form.agg === "rate" && (
               <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[11px] text-muted-foreground">分子过滤 · 列</span>
-                  <select
-                    className={inputCls}
+                <Field label="分子过滤 · 列">
+                  <Select
                     value={form.numeratorProperty}
-                    onChange={(e) => setForm({ ...form, numeratorProperty: e.target.value })}
-                  >
-                    <option value="">请选择…</option>
-                    {baseProps.map((p) => (
-                      <option key={p.name} value={p.name}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-[11px] text-muted-foreground">分子过滤 · 取值</span>
-                  <input
-                    className={inputCls}
+                    onChange={(v) => setForm({ ...form, numeratorProperty: v })}
+                    options={[
+                      { value: "", label: "请选择…" },
+                      ...baseProps.map((p) => ({ value: p.name, label: p.name })),
+                    ]}
+                  />
+                </Field>
+                <Field label="分子过滤 · 取值">
+                  <Input
                     value={form.numeratorValue}
                     placeholder="离职"
                     onChange={(e) => setForm({ ...form, numeratorValue: e.target.value })}
                   />
-                </label>
+                </Field>
               </div>
             )}
 
             {/* Base (口径) filters — equality only */}
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">固定过滤（口径，列 = 值）</span>
+                <span className="text-[13px] font-medium text-foreground">固定过滤（口径，列 = 值）</span>
                 <Button
                   size="xs"
                   variant="ghost"
@@ -567,26 +587,22 @@ export default function MetricsSemanticsPage() {
                 </Button>
               </div>
               {form.baseFilters.map((f, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <select
-                    className={inputCls}
+                <div key={i} className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-1.5">
+                  <Select
                     value={f.property}
-                    onChange={(e) => {
+                    onChange={(v) => {
                       const next = [...form.baseFilters]
-                      next[i] = { ...f, property: e.target.value }
+                      next[i] = { ...f, property: v }
                       setForm({ ...form, baseFilters: next })
                     }}
-                  >
-                    <option value="">列…</option>
-                    {baseProps.map((p) => (
-                      <option key={p.name} value={p.name}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      { value: "", label: "列…" },
+                      ...baseProps.map((p) => ({ value: p.name, label: p.name })),
+                    ]}
+                  />
                   <span className="text-xs text-muted-foreground">=</span>
-                  <input
-                    className={inputCls}
+                  <Input
+                    className="h-8"
                     value={f.value}
                     placeholder="在职"
                     onChange={(e) => {
@@ -608,9 +624,9 @@ export default function MetricsSemanticsPage() {
             </div>
 
             {/* Dimensions */}
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-muted-foreground">维度（切片）</span>
+                <span className="text-[13px] font-medium text-foreground">维度（切片）</span>
                 <Button
                   size="xs"
                   variant="ghost"
@@ -627,10 +643,10 @@ export default function MetricsSemanticsPage() {
               {form.dimensions.map((d, i) => {
                 const cols = d.linkId ? farPropsForLink(d.linkId) : baseProps
                 return (
-                  <div key={i} className="space-y-1 rounded-md border border-border p-1.5">
+                  <div key={i} className="flex flex-col gap-1.5 rounded-lg border border-border p-2">
                     <div className="flex items-center gap-1.5">
-                      <input
-                        className={inputCls}
+                      <Input
+                        className="h-8"
                         value={d.label}
                         placeholder="维度标签，如 所属部门"
                         onChange={(e) => {
@@ -652,63 +668,52 @@ export default function MetricsSemanticsPage() {
                       </button>
                     </div>
                     <div className="grid grid-cols-2 gap-1.5">
-                      <select
-                        className={inputCls}
+                      <Select
                         value={d.linkId}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const next = [...form.dimensions]
-                          next[i] = { ...d, linkId: e.target.value, column: "" }
+                          next[i] = { ...d, linkId: v, column: "" }
                           setForm({ ...form, dimensions: next })
                         }}
-                      >
-                        <option value="">本类型列</option>
-                        {baseLinks.map((l) => (
-                          <option key={l.id} value={l.id}>
-                            沿链接 {l.display_name}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className={inputCls}
+                        options={[
+                          { value: "", label: "本类型列" },
+                          ...baseLinks.map((l) => ({ value: l.id, label: `沿链接 ${l.display_name}` })),
+                        ]}
+                      />
+                      <Select
                         value={d.column}
-                        onChange={(e) => {
+                        onChange={(v) => {
                           const next = [...form.dimensions]
-                          next[i] = { ...d, column: e.target.value }
+                          next[i] = { ...d, column: v }
                           setForm({ ...form, dimensions: next })
                         }}
-                      >
-                        <option value="">列…</option>
-                        {cols.map((p) => (
-                          <option key={p.name} value={p.name}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          { value: "", label: "列…" },
+                          ...cols.map((p) => ({ value: p.name, label: p.name })),
+                        ]}
+                      />
                     </div>
                   </div>
                 )
               })}
             </div>
 
-            <label className="flex flex-col gap-0.5">
-              <span className="text-[11px] text-muted-foreground">口径说明（可选，留空自动推导）</span>
+            <Field label="口径说明" hint="可选，留空自动推导">
               <textarea
-                className={`${inputCls} min-h-16`}
+                className="min-h-16 rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
                 value={form.descriptionOverride}
                 onChange={(e) => setForm({ ...form, descriptionOverride: e.target.value })}
               />
-            </label>
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <Button variant="ghost" size="sm" onClick={() => setFormOpen(false)}>
-                取消
-              </Button>
-              <Button size="sm" onClick={submit} disabled={saving}>
-                {saving && <Loader2Icon className="animate-spin" />}
-                {editingKey ? "保存" : "创建"}
-              </Button>
-            </div>
+            </Field>
           </div>
+
+          <SheetFooter className="flex-row justify-end gap-2 border-t border-border">
+            <SheetClose render={<Button variant="outline" size="sm" />}>取消</SheetClose>
+            <Button size="sm" onClick={submit} disabled={saving}>
+              {saving && <Loader2Icon className="animate-spin" />}
+              {editingKey ? "保存" : "创建"}
+            </Button>
+          </SheetFooter>
         </SheetContent>
       </Sheet>
     </PageContainer>

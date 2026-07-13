@@ -30,8 +30,10 @@ export type AppDef = {
 }
 
 // The App launcher / left-rail registry, grouped by the architecture's layers.
-// AIP sits on top; dataset-level BI is delegated to Superset (see /bi/*), while
-// object-level exploration stays first-party (see /explorer). Governance is
+// AIP sits on top; the 分析洞察 layer covers analytics (metrics & dashboards,
+// object exploration), metric semantics (口径) and the app builder — authoring
+// of business apps lives here rather than in the 业务应用 layer, which is now
+// consumption-only. The 数据与本体 layer stays admin-facing. Governance is
 // cross-cutting but also gets a console.
 export const APP_LAYERS: AppLayer[] = [
   {
@@ -48,20 +50,12 @@ export const APP_LAYERS: AppLayer[] = [
     ],
   },
   {
-    // Business applications assembled in the app builder (Puck) and served by
-    // the native runtime. Split into two postures: "我的应用" (management —
-    // create / edit / publish / delete, the builder is entered here) and
-    // "应用目录" (consumption — browse and run published apps only).
+    // Business applications served by the native runtime. Consumption-only:
+    // browse and run published apps. Authoring (create / edit / publish /
+    // delete) now lives in the 分析洞察 layer's 应用构建器.
     key: "apps",
     label: "业务应用",
     apps: [
-      {
-        key: "apps-mine",
-        title: "我的应用",
-        href: "/apps/mine",
-        icon: LayoutTemplateIcon,
-        desc: "管理你创建的应用 · 搭建 / 发布 / 删除",
-      },
       {
         key: "apps",
         title: "应用目录",
@@ -72,9 +66,10 @@ export const APP_LAYERS: AppLayer[] = [
     ],
   },
   {
-    // Analytics over the same object universe, two postures: aggregate
-    // metrics (Contour-style) and per-object exploration (Object Explorer /
-    // Quiver-style). Engines stay headless behind the platform's own pages.
+    // Analytics over the same object universe: aggregate metrics (Contour-style)
+    // and per-object exploration (Object Explorer / Quiver-style), plus metric
+    // semantics (口径) and the business-app builder. Engines stay headless
+    // behind the platform's own pages.
     key: "analytics",
     label: "分析洞察",
     apps: [
@@ -91,6 +86,20 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/explorer",
         icon: BoxesIcon,
         desc: "浏览本体对象实例 · 时间轴 / 地图",
+      },
+      {
+        key: "metrics",
+        title: "指标语义",
+        href: "/metrics",
+        icon: GaugeIcon,
+        desc: "指标口径 · 维度 · Cube 映射（只读）",
+      },
+      {
+        key: "app-builder",
+        title: "应用构建器",
+        href: "/apps/builder",
+        icon: LayoutTemplateIcon,
+        desc: "搭建 / 发布 / 管理业务应用",
       },
     ],
   },
@@ -121,15 +130,6 @@ export const APP_LAYERS: AppLayer[] = [
         icon: Share2Icon,
         desc: "对象 / 链接 / 属性建模",
         adminOnly: true,
-      },
-      {
-        // All-users: read-only view of metric semantics (口径). Not adminOnly, so
-        // an analyst still sees this group (with only this item) after filtering.
-        key: "metrics",
-        title: "指标语义",
-        href: "/metrics",
-        icon: GaugeIcon,
-        desc: "指标口径 · 维度 · Cube 映射（只读）",
       },
     ],
   },

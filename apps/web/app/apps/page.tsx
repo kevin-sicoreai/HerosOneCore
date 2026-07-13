@@ -10,7 +10,8 @@ import { PageContainer, PageHeading } from "@/components/page-container"
 import { Button } from "@/components/ui/button"
 
 // Consumption view: lists only published apps and opens them straight into the
-// runtime. All authoring (create / edit / publish / delete) lives on /apps/mine.
+// runtime. All authoring (create / edit / publish / delete) lives on
+// /apps/builder.
 export default function AppsCatalogPage() {
   const router = useRouter()
   const [apps, setApps] = React.useState<AppSummary[]>([])
@@ -49,7 +50,7 @@ export default function AppsCatalogPage() {
       />
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+        <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-2.5 text-sm text-danger">
           {error}
         </div>
       )}
@@ -61,8 +62,8 @@ export default function AppsCatalogPage() {
       ) : apps.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
           还没有已发布的应用。前往
-          <Link href="/apps/mine" className="mx-1 text-emerald-500 hover:underline">
-            我的应用
+          <Link href="/apps/builder" className="mx-1 text-emerald-500 hover:underline">
+            应用构建器
           </Link>
           创建并发布。
         </div>

@@ -83,8 +83,8 @@ export default function AppBuilderPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
         <span>加载失败：{loadError}</span>
-        <Button size="sm" variant="outline" onClick={() => router.push("/apps")}>
-          <ArrowLeftIcon /> 返回目录
+        <Button size="sm" variant="outline" onClick={() => router.push("/apps/builder")}>
+          <ArrowLeftIcon /> 返回构建器
         </Button>
       </div>
     )
