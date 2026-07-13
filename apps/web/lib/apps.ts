@@ -4,7 +4,6 @@ import {
   DatabaseIcon,
   GaugeIcon,
   LayoutDashboardIcon,
-  LayoutTemplateIcon,
   Share2Icon,
   ShieldCheckIcon,
   WorkflowIcon,
@@ -30,10 +29,10 @@ export type AppDef = {
 
 // The App launcher / left-rail registry, grouped by the architecture's layers.
 // AIP sits on top; the 分析洞察 layer covers analytics (metrics & dashboards,
-// object exploration), metric semantics (口径) and the app builder. Business
-// apps have no menu group of their own: authoring lives in 应用构建器 and the
-// /apps runtime routes stay reachable from there (打开/预览). The 数据与本体
-// layer stays admin-facing. Governance is cross-cutting but also gets a console.
+// object exploration) and metric semantics (口径). The business-app builder and
+// runtime routes (/apps/builder, /apps, /apps/[id]) keep working but have no
+// menu entry for now. The 数据与本体 layer stays admin-facing. Governance is
+// cross-cutting but also gets a console.
 export const APP_LAYERS: AppLayer[] = [
   {
     key: "aip",
@@ -51,8 +50,7 @@ export const APP_LAYERS: AppLayer[] = [
   {
     // Analytics over the same object universe: aggregate metrics (Contour-style)
     // and per-object exploration (Object Explorer / Quiver-style), plus metric
-    // semantics (口径) and the business-app builder. Engines stay headless
-    // behind the platform's own pages.
+    // semantics (口径). Engines stay headless behind the platform's own pages.
     key: "analytics",
     label: "分析洞察",
     apps: [
@@ -76,13 +74,6 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/metrics",
         icon: GaugeIcon,
         desc: "指标口径 · 维度 · Cube 映射（只读）",
-      },
-      {
-        key: "app-builder",
-        title: "应用构建器",
-        href: "/apps/builder",
-        icon: LayoutTemplateIcon,
-        desc: "搭建 / 发布 / 管理业务应用",
       },
     ],
   },
