@@ -1,9 +1,10 @@
 [project]
-name = "askdelphi-assist"
+name = "herosonecore-assist"
 version = "0.1.0"
-description = "AskDelphi assist service — AIP copilot agent (deepagents) with streaming chat"
+description = "HerosOneCore assist service — AIP copilot agent (deepagents) with streaming chat"
 requires-python = ">=3.11"
 dependencies = [
+    "psycopg[binary]>=3.2",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "sqlalchemy>=2.0",

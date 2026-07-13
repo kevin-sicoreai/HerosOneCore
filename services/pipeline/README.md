@@ -1,6 +1,6 @@
 # Pipeline Service
 
-Transformation layer for AskDelphi. Users build a visual DAG (source → transform
+Transformation layer for HerosOneCore. Users build a visual DAG (source → transform
 / join → output); the service compiles it into a **dbt** project and runs it,
 turning raw datasets from the data service into staging/mart datasets.
 

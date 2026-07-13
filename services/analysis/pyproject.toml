@@ -1,7 +1,7 @@
 [project]
-name = "askdelphi-analysis"
+name = "herosonecore-analysis"
 version = "0.1.0"
-description = "AskDelphi analysis service — dimensional aggregation over platform datasets"
+description = "HerosOneCore analysis service — dimensional aggregation over platform datasets"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

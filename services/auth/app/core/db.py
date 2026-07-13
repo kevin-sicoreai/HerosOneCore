@@ -8,11 +8,10 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from app.core.config import settings
 from app.core.security import hash_password
 
-_is_sqlite = settings.database_url.startswith("sqlite")
-
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False} if _is_sqlite else {},
+    # Remote Postgres: transparently replace connections dropped by the server.
+    pool_pre_ping=True,
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -51,8 +50,8 @@ def init_db() -> None:
         # Seed demo users (idempotent by username): a platform admin (full rights)
         # and a data analyst (read/write but no delete/admin) to show enforcement.
         seed_users = [
-            (settings.bootstrap_admin_username, settings.bootstrap_admin_password, "平台管理员", "admin@askdelphi.local"),
-            ("analyst", "analyst", "数据分析师", "analyst@askdelphi.local"),
+            (settings.bootstrap_admin_username, settings.bootstrap_admin_password, "平台管理员", "admin@herosonecore.local"),
+            ("analyst", "analyst", "数据分析师", "analyst@herosonecore.local"),
         ]
         for username, password, role_name, email in seed_users:
             if db.scalar(select(User).where(User.username == username)) is not None:

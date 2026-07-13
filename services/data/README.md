@@ -1,6 +1,6 @@
 # Data Service
 
-Connector & dataset control plane for AskDelphi. It manages connections to
+Connector & dataset control plane for HerosOneCore. It manages connections to
 external source systems, ingests their data into the data plane, and exposes a
 dataset catalog (schema + preview) for downstream services.
 

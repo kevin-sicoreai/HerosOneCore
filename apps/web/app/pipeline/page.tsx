@@ -22,7 +22,7 @@ import {
   SaveIcon,
   SlidersHorizontalIcon,
   Trash2Icon,
-  WorkflowIcon,
+  XIcon,
 } from "lucide-react"
 
 import { dataApi, type Dataset } from "@/lib/data-api"
@@ -35,7 +35,7 @@ import {
   type StepKind,
 } from "@/lib/pipeline-api"
 import { FlowCanvas } from "@/components/flow/flow-canvas"
-import { PageContainer, PageHeading } from "@/components/page-container"
+import { PageContainer } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
@@ -44,13 +44,13 @@ const NODE_H = 44
 
 const KIND: Record<StepKind, { color: string; icon: React.ElementType; label: string }> = {
   source: { color: "border-sky-500/50 text-sky-500", icon: DatabaseIcon, label: "数据源" },
-  transform: { color: "border-emerald-500/50 text-emerald-500", icon: SlidersHorizontalIcon, label: "转换" },
+  transform: { color: "border-blue-500/50 text-blue-500", icon: SlidersHorizontalIcon, label: "转换" },
   join: { color: "border-amber-500/50 text-amber-500", icon: GitMergeIcon, label: "关联" },
   output: { color: "border-violet-500/50 text-violet-500", icon: BoxesIcon, label: "输出对象" },
 }
 
 const STATUS_RING: Record<string, string> = {
-  success: "ring-2 ring-emerald-500",
+  success: "ring-2 ring-blue-500",
   failed: "ring-2 ring-red-500",
   running: "ring-2 ring-amber-500",
   pending: "ring-2 ring-amber-400/60",
@@ -95,7 +95,7 @@ function PipelineNode({ data, selected }: NodeProps) {
   return (
     <div
       className={`flex items-center gap-1.5 rounded-lg border-2 bg-card px-2 shadow-sm ${k.color} ${ring} ${
-        selected ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""
+        selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-background" : ""
       }`}
       style={{ width: NODE_W, height: NODE_H }}
     >
@@ -296,72 +296,85 @@ export default function PipelinePage() {
   }
 
   return (
-    <PageContainer>
-      <PageHeading
-        title="管道构建器"
-        desc="拖拽节点、连线、配置，编译为 dbt 运行"
-        icon={<WorkflowIcon />}
-        actions={
-          <>
-            <select
-              value={pid}
-              onChange={(e) => switchPipeline(e.target.value)}
-              className="h-8 rounded-md border border-border bg-card px-2 text-sm"
-            >
-              {pipelines.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <Button size="sm" variant="outline" onClick={newPipeline}><PlusIcon /> 新建</Button>
-            <Button size="sm" variant="outline" disabled={busy || !pid} onClick={deletePipeline}><Trash2Icon /> 删除</Button>
+    <PageContainer className="h-full">
+      {/* One connected window: a grouped menu/toolbar bar on top, the canvas
+          nested seamlessly below — no floating gap between the two. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
+          {/* group: pipeline selection + management */}
+          <span className="text-xs font-medium text-muted-foreground">管道</span>
+          <select
+            value={pid}
+            onChange={(e) => switchPipeline(e.target.value)}
+            className="h-8 min-w-[168px] rounded-lg border border-input bg-transparent px-2.5 text-sm font-medium outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+          >
+            {pipelines.length === 0 && <option value="">（暂无管道）</option>}
+            {pipelines.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <Button size="sm" variant="outline" onClick={newPipeline}><PlusIcon /> 新建</Button>
+          <Button size="sm" variant="outline" disabled={busy || !pid} onClick={deletePipeline}><Trash2Icon /> 删除</Button>
+
+          <div className="mx-1 h-5 w-px bg-border" />
+
+          {/* group: add node */}
+          <span className="text-xs font-medium text-muted-foreground">添加</span>
+          {(Object.keys(KIND) as StepKind[]).map((k) => {
+            const K = KIND[k]
+            return (
+              <button
+                key={k}
+                onClick={() => addNode(k)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:bg-accent"
+              >
+                <K.icon className={`size-3.5 ${K.color.split(" ")[1]}`} /> {K.label}
+              </button>
+            )
+          })}
+
+          {/* group: lifecycle actions */}
+          <div className="ml-auto flex items-center gap-2">
+            {msg && (
+              <span title={msg} className="max-w-[220px] truncate text-xs text-muted-foreground">
+                {msg}
+              </span>
+            )}
+            <div className="mx-1 h-5 w-px bg-border" />
             <Button size="sm" variant="outline" disabled={busy || !pid} onClick={save}><SaveIcon /> 保存</Button>
             <Button size="sm" variant="outline" disabled={busy || !pid} onClick={validate}>校验</Button>
             <Button size="sm" disabled={busy || !pid} onClick={run}><PlayIcon /> 运行</Button>
-          </>
-        }
-      />
+          </div>
+        </div>
 
-      {msg && <div className="rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">{msg}</div>}
+        <div className="relative min-h-0 flex-1">
+          <FlowCanvas
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            setNodes={setNodes}
+            onNodeClick={onNodeClick}
+            onPaneClick={() => setSelectedId(null)}
+            direction="LR"
+            emptyHint="点击上方「添加节点」开始构建"
+          />
 
-      {/* node palette */}
-      <div className="flex flex-wrap gap-2">
-        {(Object.keys(KIND) as StepKind[]).map((k) => {
-          const K = KIND[k]
-          return (
-            <Button key={k} size="sm" variant="outline" onClick={() => addNode(k)}>
-              <K.icon /> + {K.label}
-            </Button>
-          )
-        })}
-        <Badge variant="outline" className="ml-auto">拖拽节点右侧手柄连线 · 滚轮缩放 · 拖空白平移</Badge>
-      </div>
-
-      <div className="grid h-[clamp(380px,52vh,600px)] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <FlowCanvas
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          setNodes={setNodes}
-          onNodeClick={onNodeClick}
-          onPaneClick={() => setSelectedId(null)}
-          direction="LR"
-          emptyHint="从上方添加节点开始构建"
-        />
-
-        {/* config panel */}
-        <div className="flex flex-col gap-3 overflow-auto rounded-xl border border-border bg-card p-4">
-          {sel ? (
-            <>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {React.createElement(KIND[sel.kind].icon, { className: `size-4 ${KIND[sel.kind].color.split(" ")[1]}` })}
-                  <Badge variant="outline">{KIND[sel.kind].label}</Badge>
-                </div>
-                <Button size="sm" variant="ghost" onClick={deleteSelected}><Trash2Icon /></Button>
+        {/* selected element — floating inspector popup (not docked to the right) */}
+        {sel && (
+          <div className="absolute left-4 top-4 z-20 flex max-h-[calc(100%-2rem)] w-[300px] flex-col gap-3 overflow-auto rounded-xl border border-border bg-card p-4 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {React.createElement(KIND[sel.kind].icon, { className: `size-4 ${KIND[sel.kind].color.split(" ")[1]}` })}
+                <Badge variant="outline">{KIND[sel.kind].label}</Badge>
               </div>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={deleteSelected}><Trash2Icon /></Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelectedId(null)}><XIcon /></Button>
+              </div>
+            </div>
 
               <Field label="名称">
                 <input value={sel.label ?? ""} onChange={(e) => patchData({ label: e.target.value })} className={inputCls} />
@@ -398,10 +411,8 @@ export default function PipelinePage() {
               {sel.kind === "output" && (
                 <Field label="输出数据集名"><input value={String(sel.config.name ?? "")} onChange={(e) => updateConfig("name", e.target.value)} className={inputCls} /></Field>
               )}
-            </>
-          ) : (
-            <div className="text-sm text-muted-foreground">选择一个节点编辑，或添加新节点。<br />拖节点右侧手柄到目标节点即可连线。</div>
-          )}
+          </div>
+        )}
         </div>
       </div>
     </PageContainer>

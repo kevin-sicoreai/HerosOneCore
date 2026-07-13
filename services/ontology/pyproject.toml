@@ -1,9 +1,10 @@
 [project]
-name = "askdelphi-ontology"
+name = "herosonecore-ontology"
 version = "0.1.0"
-description = "AskDelphi ontology service — object types, properties, links over datasets"
+description = "HerosOneCore ontology service — object types, properties, links over datasets"
 requires-python = ">=3.11"
 dependencies = [
+    "psycopg[binary]>=3.2",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "sqlalchemy>=2.0",

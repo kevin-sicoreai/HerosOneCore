@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.auth import require_token
 from app.core.db import get_db
 from app.schemas.governance import (
-    AuditEntry,
     AuditEventIn,
+    AuditPage,
     ClassificationIn,
     ClassificationOut,
     Lineage,
@@ -16,6 +16,7 @@ from app.schemas.governance import (
 )
 from app.services import (
     audit_service,
+    catalog_service,
     classifications_service,
     lineage_service,
     roles_service,
@@ -26,13 +27,29 @@ router = APIRouter(tags=["governance"])
 
 
 @router.get("/lineage", response_model=Lineage)
-def get_lineage() -> Lineage:
+def get_lineage(_: None = Depends(require_token)) -> Lineage:
     return lineage_service.build()
 
 
-@router.get("/audit", response_model=list[AuditEntry])
-def get_audit(limit: int = Query(default=100, ge=1, le=1000), db: Session = Depends(get_db)) -> list[AuditEntry]:
-    return audit_service.build(db, limit)
+@router.get("/audit", response_model=AuditPage)
+def get_audit(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    source: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _: None = Depends(require_token),
+) -> AuditPage:
+    items, total = audit_service.list_page(
+        db, page=page, page_size=page_size, source=source, q=q
+    )
+    return AuditPage(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=audit_service.page_count(total, page_size),
+    )
 
 
 @router.post("/audit-events", status_code=status.HTTP_204_NO_CONTENT)
@@ -46,18 +63,20 @@ def ingest_audit(
 
 
 @router.get("/roles", response_model=list[RoleOut])
-def get_roles(db: Session = Depends(get_db)) -> list[RoleOut]:
+def get_roles(db: Session = Depends(get_db), _: None = Depends(require_token)) -> list[RoleOut]:
     return [RoleOut.model_validate(r) for r in roles_service.list_all(db)]
 
 
 @router.get("/stats", response_model=Stats)
-def get_stats(db: Session = Depends(get_db)) -> Stats:
+def get_stats(db: Session = Depends(get_db), _: None = Depends(require_token)) -> Stats:
     return stats_service.build(db)
 
 
 @router.get("/classifications", response_model=list[ClassificationOut])
-def get_classifications(db: Session = Depends(get_db)) -> list[ClassificationOut]:
-    """Full list of sensitive-column classifications (open read)."""
+def get_classifications(
+    db: Session = Depends(get_db), _: None = Depends(require_token)
+) -> list[ClassificationOut]:
+    """Full list of sensitive-column classifications."""
     return [ClassificationOut.model_validate(c) for c in classifications_service.list_all(db)]
 
 
@@ -79,3 +98,18 @@ def delete_classification(
 ) -> None:
     if not classifications_service.delete(db, classification_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Classification not found")
+
+
+@router.get("/catalog/status")
+def catalog_status(_: None = Depends(require_token)) -> dict:
+    """Publisher config + OM reachability + last sync outcome."""
+    return catalog_service.status()
+
+
+@router.post("/catalog/sync")
+def catalog_sync(_: None = Depends(require_token)) -> dict:
+    """Push all platform assets + lineage into the configured catalog."""
+    result = catalog_service.sync()
+    if "error" in result:
+        raise HTTPException(status.HTTP_409_CONFLICT, result["error"])
+    return result

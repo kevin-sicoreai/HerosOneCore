@@ -1,6 +1,6 @@
 # Ontology Service
 
-Semantic layer for AskDelphi. Turns datasets (from the data service) into typed
+Semantic layer for HerosOneCore. Turns datasets (from the data service) into typed
 **object types** with **properties** and **links** (relationships). Object
 *instances* are not copied here — they are queried on demand from the backing
 dataset's Parquet on the data plane.

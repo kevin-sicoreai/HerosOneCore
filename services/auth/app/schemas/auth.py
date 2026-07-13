@@ -14,6 +14,14 @@ class RoleOut(BaseModel):
     member_count: int
 
 
+class RolePatch(BaseModel):
+    """Partial update of a role's capabilities (admin only)."""
+
+    can_read: bool | None = None
+    can_write: bool | None = None
+    can_admin: bool | None = None
+
+
 class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1)

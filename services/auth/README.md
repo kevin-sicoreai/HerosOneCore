@@ -1,6 +1,6 @@
 # Auth Service
 
-Identity & access for AskDelphi: users, roles (read/write/admin), password login
+Identity & access for HerosOneCore: users, roles (read/write/admin), password login
 issuing a **JWT**, and authorization via `/me`. It is the source of truth for the
 roles shown in the governance access matrix.
 

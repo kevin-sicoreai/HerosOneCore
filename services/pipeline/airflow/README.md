@@ -8,13 +8,13 @@ service catalogs.
 ## Build
 
 ```bash
-docker build --platform linux/arm64 -t askdelphi-airflow:latest services/pipeline/airflow
+docker build --platform linux/arm64 -t herosonecore-airflow:latest services/pipeline/airflow
 ```
 
 ## Run (standalone, dev)
 
 ```bash
-REPO=/Users/yeskk/project/sicore/demo/AskDelphi
+REPO=/Users/yeskk/project/sicore/demo/HerosOneCore
 docker run -d --name airflow-dbt \
   --platform linux/arm64 \
   --user "$(id -u):0" \
@@ -25,7 +25,7 @@ docker run -d --name airflow-dbt \
   -v "$REPO":"$REPO" \
   -v "$REPO/services/pipeline/airflow/dags":/opt/airflow/dags \
   -p 8080:8080 \
-  askdelphi-airflow:latest standalone
+  herosonecore-airflow:latest standalone
 
 # create a known REST user (used by the pipeline service)
 docker exec airflow-dbt airflow users create \

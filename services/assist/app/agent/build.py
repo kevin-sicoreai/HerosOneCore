@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 from app.agent.tools import AGENT_TOOLS
 from app.core.config import settings
 
-SYSTEM_PROMPT = """你是 AskDelphi 数据平台的 AIP 助手，帮助用户查询和分析平台的本体对象。
+SYSTEM_PROMPT = """你是 HerosOneCore 数据平台的 AIP 助手，帮助用户查询和分析平台的本体对象。
 
 平台的数据以「本体对象类型」（如员工、部门、职位、绩效考核、招聘投递）组织，这是构建在底层数据之上的语义层。你只操作本体，不直接访问原始数据集。
 

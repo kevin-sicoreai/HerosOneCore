@@ -2,12 +2,11 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { CheckIcon, LogOutIcon, ShieldCheckIcon, UserIcon, XIcon } from "lucide-react"
+import { CheckIcon, ShieldCheckIcon, UserIcon, XIcon } from "lucide-react"
 
-import { authApi, clearToken, type Me } from "@/lib/auth-api"
+import { authApi, type Me } from "@/lib/auth-api"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function ProfilePage() {
@@ -24,11 +23,6 @@ export default function ProfilePage() {
       })
       .finally(() => setLoading(false))
   }, [router])
-
-  function logout() {
-    clearToken()
-    router.replace("/login")
-  }
 
   const perms: { key: keyof Me["permissions"]; label: string }[] = [
     { key: "can_read", label: "读取" },
@@ -47,7 +41,7 @@ export default function ProfilePage() {
           {/* identity */}
           <Card>
             <CardContent className="flex items-center gap-4">
-              <div className="flex size-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-emerald-500 text-xl font-bold text-white">
+              <div className="flex size-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-blue-500 text-xl font-bold text-white">
                 {me.username.slice(0, 1).toUpperCase()}
               </div>
               <div className="flex flex-col gap-1">
@@ -68,7 +62,7 @@ export default function ProfilePage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <ShieldCheckIcon className="size-4 text-emerald-500" /> 权限
+                <ShieldCheckIcon className="size-4 text-blue-500" /> 权限
               </CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-3 gap-3">
@@ -78,7 +72,7 @@ export default function ProfilePage() {
                   <div key={p.key} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
                     <span className="text-sm">{p.label}</span>
                     {on ? (
-                      <span className="flex items-center gap-1 text-sm text-emerald-500"><CheckIcon className="size-4" /> 允许</span>
+                      <span className="flex items-center gap-1 text-sm text-blue-500"><CheckIcon className="size-4" /> 允许</span>
                     ) : (
                       <span className="flex items-center gap-1 text-sm text-muted-foreground"><XIcon className="size-4" /> 禁止</span>
                     )}
@@ -88,11 +82,6 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
 
-          <div>
-            <Button variant="outline" onClick={logout}>
-              <LogOutIcon /> 退出登录
-            </Button>
-          </div>
         </>
       )}
     </PageContainer>

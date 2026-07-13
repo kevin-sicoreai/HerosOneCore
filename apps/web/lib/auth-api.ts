@@ -3,7 +3,7 @@
 export const AUTH_API =
   process.env.NEXT_PUBLIC_AUTH_API_URL ?? "/api/auth"
 
-const TOKEN_KEY = "askdelphi_token"
+const TOKEN_KEY = "herosonecore_token"
 
 export function getToken(): string | null {
   return typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null
@@ -20,6 +20,15 @@ export type Me = {
   username: string
   roles: string[]
   permissions: { can_read: boolean; can_write: boolean; can_admin: boolean }
+}
+
+export type AuthRole = {
+  id: string
+  name: string
+  can_read: boolean
+  can_write: boolean
+  can_admin: boolean
+  member_count: number
 }
 
 export const authApi = {
@@ -41,5 +50,28 @@ export const authApi = {
     const res = await fetch(`${AUTH_API}/me`, { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) return null
     return (await res.json()) as Me
+  },
+
+  async roles(): Promise<AuthRole[]> {
+    const res = await fetch(`${AUTH_API}/roles`)
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+    return (await res.json()) as AuthRole[]
+  },
+
+  async patchRole(
+    id: string,
+    patch: Partial<Pick<AuthRole, "can_read" | "can_write" | "can_admin">>
+  ): Promise<AuthRole> {
+    const token = getToken()
+    const res = await fetch(`${AUTH_API}/roles/${id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+    return (await res.json()) as AuthRole
   },
 }

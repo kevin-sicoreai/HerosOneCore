@@ -65,10 +65,10 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
     if (!open || !resource) return
     setLoading(true)
     setFailed(false)
-    Promise.all([governanceApi.roles(), governanceApi.audit(50), governanceApi.lineage()])
+    Promise.all([governanceApi.roles(), governanceApi.audit({ pageSize: 50 }), governanceApi.lineage()])
       .then(([r, a, l]) => {
         setRoles(r)
-        setAudit(a)
+        setAudit(a.items)
         setLineage(l)
       })
       .catch(() => setFailed(true))

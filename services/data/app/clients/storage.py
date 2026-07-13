@@ -1,7 +1,9 @@
 """Data-plane storage helper.
 
-P0 writes Parquet to a local directory. The functions here are the seam that
-later points at MinIO/S3 (Iceberg tables) without changing callers.
+Where raw Parquet lands is decided by ``settings.storage_backend``:
+  s3    -> s3://{bucket}/raw/{connector_id}/{table}.parquet on MinIO/S3
+  local -> {data_plane_dir}/raw/{connector_id}/{table}.parquet (fallback)
+Callers only ever see a URI, so switching backends never touches them.
 """
 
 import os
@@ -17,5 +19,7 @@ def _raw_dir(connector_id: str) -> str:
 
 
 def dataset_uri(connector_id: str, table: str) -> str:
-    """Absolute path of the Parquet file backing a raw dataset."""
+    """URI of the Parquet object/file backing a raw dataset."""
+    if settings.storage_backend == "s3":
+        return f"s3://{settings.s3_bucket}/raw/{connector_id}/{table}.parquet"
     return os.path.join(_raw_dir(connector_id), f"{table}.parquet")

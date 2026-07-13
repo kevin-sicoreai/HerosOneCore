@@ -1,4 +1,4 @@
-"""AskDelphi governance service — FastAPI application entry point."""
+"""HerosOneCore governance service — FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
 
@@ -21,9 +21,16 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AskDelphi Governance Service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="HerosOneCore Governance Service", version="0.1.0", lifespan=lifespan)
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    # The web app reaches this service via Next.js rewrites (same-origin,
+    # server-side proxy), so browser CORS only needs local dev origins.
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(governance.router)
 
