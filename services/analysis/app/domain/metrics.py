@@ -19,15 +19,21 @@ from dataclasses import dataclass, field
 class Dimension:
     """A way to slice a metric.
 
-    property: the column to group by. When via_link is None it is a property of
-    the metric's base type; otherwise it is a property of the far type reached by
-    joining the base type through the named link.
+    property: the column to group by. When the dimension lives on the base type
+    ``via_link`` / ``via_link_id`` are None; otherwise it is a property of the
+    far type reached by joining the base type through the referenced link.
+
+    ``via_link_id`` (the ontology link id) is authoritative for resolving the
+    join — both the native engine and the Cube generator resolve by id, which is
+    stable across renames. ``via_link`` (display_name) is cosmetic: it backs the
+    human-readable fallback column in the read-only semantics view.
     """
 
     key: str
     label: str
     property: str
     via_link: str | None = None  # link display_name; None = property on base type
+    via_link_id: str | None = None  # link id; authoritative for join resolution
 
 
 @dataclass(frozen=True)

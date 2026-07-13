@@ -9,6 +9,7 @@ from app.api import analyses, analysis, metrics
 from app.core.config import settings
 from app.core.db import init_db
 from app.core.logging import configure_logging, get_logger
+from app.services import metric_defs
 
 configure_logging()
 logger = get_logger("main")
@@ -16,9 +17,15 @@ logger = get_logger("main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create the saved-analyses schema. Reads/aggregation do not depend on this,
-    # so a DB failure would only affect the /analyses endpoints.
+    # Create the saved-analyses + metric-definition schema. Reads/aggregation do
+    # not depend on this, so a DB failure would only affect the DB-backed routes.
     init_db()
+    # Idempotently seed the metric catalog from the legacy hardcoded registry so
+    # a fresh DB comes up with the same metrics (best-effort; never blocks boot).
+    try:
+        metric_defs.seed_from_registry()
+    except Exception as exc:  # noqa: BLE001 - seeding must never fail startup
+        logger.warning("metric seed failed: %s", exc)
     logger.info("analysis service ready (db=%s)", settings.database_url)
     yield
 

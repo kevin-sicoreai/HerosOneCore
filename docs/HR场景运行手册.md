@@ -85,6 +85,11 @@ bash cube/up.sh                                                    # 起 askdelp
 生成器每对象类型产一个 `cube/model/cubes/<api_name>.yml`(敏感列不出维度)+
 `metric_map.json`(指标→Cube 成员映射)。重跑覆盖输出目录,幂等。
 
+指标定义现为声明式,存于 analysis 的 SQLite(`metric_defs` 表,启动时从旧硬编码
+清单幂等种子出 7 个 HR 指标)。在前端「指标语义」页查看;管理员可新建/编辑/删除
+(写操作限管理员,校验对象/列/链接后落库并发审计)。每次写入自动重新生成
+`cube/model`(生成失败不回滚,响应带 warning,查询回落自研引擎),故通常无需手动跑生成器。
+
 引擎切换:analysis 默认 `METRICS_ENGINE=cube`;想强制自研引擎设
 `METRICS_ENGINE=native`。Cube 不可用(未起/连不上/成员缺失)时,查询自动
 回落自研引擎,结果 `meta.engine` 标 `cube` / `native` / `native-fallback`。

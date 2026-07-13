@@ -36,7 +36,7 @@ import httpx
 
 from app.core.auth import service_headers
 from app.core.config import settings
-from app.domain.metrics import METRICS, Metric
+from app.domain.metrics import Dimension, Metric
 
 # DuckDB numeric type prefixes -> Cube "number"; DATE/TIMESTAMP -> "time";
 # everything else -> "string". Mirrors the analysis provider's numeric set.
@@ -235,18 +235,23 @@ def _cube_yaml(
 # metric_map.json                                                              #
 # --------------------------------------------------------------------------- #
 def _resolve_link_far_api(
-    links: list[dict], display_name: str, base_id: str, id_to_api: dict[str, str]
+    links: list[dict], dim: Dimension, base_id: str, id_to_api: dict[str, str]
 ) -> str:
-    """api_name of the far object type reached from `base_id` via the link named
-    `display_name` (traversed in either direction)."""
+    """api_name of the far object type a linked dimension joins to, reached from
+    `base_id`. Resolution is by link id when the dimension carries one (stable
+    across renames); otherwise it falls back to the link display_name."""
     for lk in links:
-        if lk["display_name"] != display_name:
+        if dim.via_link_id is not None:
+            if lk["id"] != dim.via_link_id:
+                continue
+        elif lk["display_name"] != dim.via_link:
             continue
         if base_id == lk["from_object_type_id"]:
             return id_to_api[lk["to_object_type_id"]]
         if base_id == lk["to_object_type_id"]:
             return id_to_api[lk["from_object_type_id"]]
-    raise ValueError(f"link '{display_name}' not connected to object type {base_id}")
+    ref = dim.via_link_id or dim.via_link
+    raise ValueError(f"link '{ref}' not connected to object type {base_id}")
 
 
 def _metric_map(
@@ -261,8 +266,8 @@ def _metric_map(
         for m in metrics:
             dims: dict[str, str] = {}
             for d in m.dimensions:
-                if d.via_link:
-                    far = _resolve_link_far_api(links, d.via_link, base_id, id_to_api)
+                if d.via_link_id or d.via_link:
+                    far = _resolve_link_far_api(links, d, base_id, id_to_api)
                     dims[d.key] = f"{far}.{d.property}"
                 else:
                     dims[d.key] = f"{api_name}.{d.property}"
@@ -278,7 +283,15 @@ def _metric_map(
 # --------------------------------------------------------------------------- #
 # Entry point                                                                  #
 # --------------------------------------------------------------------------- #
-def generate(out_dir: Path) -> None:
+def generate(out_dir: Path, metrics: dict[str, Metric] | None = None) -> None:
+    # Metric definitions are declarative and live in the DB; load them through
+    # the service (single source of truth). Imported lazily to avoid a circular
+    # import (metric_defs -> this module for regeneration).
+    if metrics is None:
+        from app.services import metric_defs
+
+        metrics = metric_defs.get_metrics(force=True)
+
     object_types = _fetch_object_types()
     links = _fetch_link_types()
     datasets = _fetch_datasets()
@@ -295,7 +308,7 @@ def generate(out_dir: Path) -> None:
         sensitive_by_ds.setdefault(c["dataset_name"], set()).add(c["column_name"])
 
     metrics_by_type: dict[str, list[Metric]] = {}
-    for m in METRICS.values():
+    for m in metrics.values():
         metrics_by_type.setdefault(m.base_type, []).append(m)
 
     cubes_dir = out_dir / "cubes"

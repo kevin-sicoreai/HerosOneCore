@@ -35,6 +35,19 @@ def _dispatch(payload: dict) -> None:
     threading.Thread(target=_post_event, args=(payload,), daemon=True).start()
 
 
+def emit_event(actor: str, action: str, target: str, status_code: int = 200) -> None:
+    """Emit a generic audit event (e.g. a metric definition change)."""
+    _dispatch(
+        {
+            "actor": actor,
+            "action": action,
+            "target": target,
+            "source": _SOURCE,
+            "status_code": status_code,
+        }
+    )
+
+
 def emit_sensitive_read(actor: str, target: str, masked: bool) -> None:
     """Report a read that touched a sensitive column (masked or plaintext)."""
     action = "读取敏感数据(已掩码)" if masked else "读取敏感数据(明文)"

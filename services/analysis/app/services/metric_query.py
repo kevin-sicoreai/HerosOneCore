@@ -25,8 +25,9 @@ from fastapi import HTTPException, status
 from app.clients import cube_service, ontology_service
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.domain.metrics import BASE_LABELS, METRICS, Dimension, Metric, describe
+from app.domain.metrics import BASE_LABELS, Dimension, Metric, describe
 from app.repositories import object_rows
+from app.services import metric_defs
 from app.schemas.analysis import FilterSpec
 from app.schemas.metrics import (
     CubeMappingOut,
@@ -73,6 +74,19 @@ class _Ontology:
             status.HTTP_400_BAD_REQUEST, f"链接 '{display_name}' 不存在或未连接该对象类型"
         )
 
+    def link_by_id(self, link_id: str, base_type_id: str) -> dict[str, Any]:
+        """The link with id `link_id`; must touch `base_type_id`. Preferred over
+        the display_name lookup — ids are stable across renames."""
+        for lk in self.links:
+            if lk["id"] != link_id:
+                continue
+            if base_type_id in (lk["from_object_type_id"], lk["to_object_type_id"]):
+                return lk
+            break
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"链接 '{link_id}' 不存在或未连接该对象类型"
+        )
+
 
 def _load_rows(object_type_id: str) -> list[dict]:
     # Shared 30s TTL cache with the analyze path; both base and join-far object
@@ -83,10 +97,14 @@ def _load_rows(object_type_id: str) -> list[dict]:
 def _enrich_linked_dimension(
     base_rows: list[dict], base_type_id: str, dim: Dimension, onto: _Ontology
 ) -> None:
-    """Fetch the far type across `dim.via_link` and stamp dim.property onto each
-    base row under dim.key. Join key values are compared as strings to avoid
+    """Fetch the far type across the dimension's link and stamp dim.property onto
+    each base row under dim.key. Join key values are compared as strings to avoid
     int/str mismatches between the two data planes."""
-    link = onto.link(dim.via_link or "", base_type_id)
+    link = (
+        onto.link_by_id(dim.via_link_id, base_type_id)
+        if dim.via_link_id
+        else onto.link(dim.via_link or "", base_type_id)
+    )
     if base_type_id == link["from_object_type_id"]:
         base_key, far_key, far_id = (
             link["from_property"],
@@ -108,7 +126,8 @@ def _enrich_linked_dimension(
 def _dim_value(row: dict, dim: Dimension) -> Any:
     # Linked dimensions are enriched under dim.key; base dimensions read the
     # property directly.
-    return row.get(dim.key) if dim.via_link else row.get(dim.property)
+    linked = dim.via_link_id or dim.via_link
+    return row.get(dim.key) if linked else row.get(dim.property)
 
 
 def _aggregate(rows: list[dict], metric: Metric) -> float:
@@ -140,6 +159,13 @@ def _aggregate(rows: list[dict], metric: Metric) -> float:
 # Cube metric map                                                             #
 # --------------------------------------------------------------------------- #
 _map_cache: dict[str, Any] | None = None
+
+
+def invalidate_metric_map() -> None:
+    """Drop the cached metric_map so the next query re-reads it — call after the
+    Cube schema (and metric_map.json) is regenerated on a definition write."""
+    global _map_cache
+    _map_cache = None
 
 
 def _metric_map() -> dict[str, Any]:
@@ -283,7 +309,7 @@ def _query_native(
     base_id = onto.type_id(metric.base_type)
     rows = _load_rows(base_id)
 
-    if dim and dim.via_link:
+    if dim and (dim.via_link_id or dim.via_link):
         _enrich_linked_dimension(rows, base_id, dim, onto)
 
     # Metric-level fixed filters pin the 口径 (e.g. 在职 only) before any grouping.
@@ -334,11 +360,12 @@ def _query_native(
 
 def list_semantics() -> list[MetricSemanticsOut]:
     """Read-only semantic view of every metric: derived 口径 description, usable
-    dimensions (with their mapped column) and Cube mapping status. Pure read over
-    the in-memory definitions and metric_map.json — no storage, no live query."""
+    dimensions (with their mapped column) and Cube mapping status. Reads the
+    declarative definitions (DB-backed catalog) and metric_map.json — no live
+    query."""
     mapping_all = _metric_map()
     out: list[MetricSemanticsOut] = []
-    for m in METRICS.values():
+    for m in metric_defs.get_metrics().values():
         mapping = mapping_all.get(m.key)
         dim_members: dict[str, str] = (mapping or {}).get("dimensions", {})
         dims = [
@@ -377,7 +404,7 @@ def list_semantics() -> list[MetricSemanticsOut]:
 def query(
     metric_key: str, dimension_key: str | None, filters: list[FilterSpec], limit: int
 ) -> MetricQueryResult:
-    metric = METRICS.get(metric_key)
+    metric = metric_defs.get_metrics().get(metric_key)
     if metric is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"指标 '{metric_key}' 不存在")
 

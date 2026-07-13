@@ -111,6 +111,52 @@ export type MetricSemantics = {
   engine_default: string
 }
 
+// --- Metric definition management (admin CRUD) ---
+
+// Where a dimension's column lives: on the base type (link_id omitted) or on a
+// far type reached through an ontology link (link_id set).
+export type MetricDimensionSourceInput = {
+  column: string
+  link_id?: string | null
+}
+
+export type MetricDimensionInput = {
+  // Optional on input; the service derives a stable slug when absent.
+  key?: string
+  label: string
+  source: MetricDimensionSourceInput
+}
+
+// One 口径 (base) filter — equality only (the semantic pin, e.g. status=在职).
+export type MetricFilterInput = {
+  property: string
+  value: string
+}
+
+// Mutable fields of a metric definition (shared by create/update).
+export type MetricDefBody = {
+  label: string
+  agg: "count" | "sum" | "avg" | "min" | "max" | "rate"
+  unit: string
+  base_type: string
+  measure_column?: string | null
+  base_filters: MetricFilterInput[]
+  numerator_property?: string | null
+  numerator_value?: string | null
+  dimensions: MetricDimensionInput[]
+  description_override?: string | null
+}
+
+export type MetricDefInput = MetricDefBody & { key: string }
+
+// Full stored definition (edit-form prefill + write responses). `warning` is set
+// when Cube schema regeneration failed on a write.
+export type MetricDefOut = MetricDefBody & {
+  key: string
+  owner: string | null
+  warning?: string | null
+}
+
 export type MetricQueryRequest = {
   metric: string
   dimension?: string | null
@@ -202,6 +248,14 @@ export const analysisApi = {
   metricSemantics: () => req<MetricSemantics[]>("/metrics/semantics"),
   queryMetric: (body: MetricQueryRequest) =>
     req<MetricQueryResult>("/metrics/query", { method: "POST", body: JSON.stringify(body) }),
+
+  // Metric definition CRUD (admin only server-side; Bearer carried by req).
+  metricDefinition: (key: string) => req<MetricDefOut>(`/metrics/${key}/definition`),
+  createMetric: (body: MetricDefInput) =>
+    req<MetricDefOut>("/metrics", { method: "POST", body: JSON.stringify(body) }),
+  updateMetric: (key: string, body: MetricDefBody) =>
+    req<MetricDefOut>(`/metrics/${key}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteMetric: (key: string) => req<void>(`/metrics/${key}`, { method: "DELETE" }),
 
   // Saved analyses CRUD (Bearer carried by req).
   listAnalyses: () => req<SavedAnalysisSummary[]>("/analyses"),

@@ -57,6 +57,77 @@ class MetricSemanticsOut(BaseModel):
     engine_default: str
 
 
+# --- Metric definition management (admin CRUD) ---------------------------- #
+
+
+class MetricFilterIn(BaseModel):
+    """One 口径 (base) filter: equality only (the semantic pin, e.g. status=在职)."""
+
+    property: str
+    value: str
+
+
+class MetricDimensionSource(BaseModel):
+    """Where a dimension's column lives: on the base type (link_id omitted) or on
+    a far type reached through an ontology link (link_id set)."""
+
+    column: str
+    link_id: str | None = None
+
+
+class MetricDimensionIn(BaseModel):
+    # key is optional on input; the service derives a stable slug when absent.
+    key: str | None = None
+    label: str
+    source: MetricDimensionSource
+
+
+class MetricDefBody(BaseModel):
+    """Mutable fields of a metric definition (shared by create/update)."""
+
+    label: str
+    agg: str
+    unit: str = ""
+    base_type: str  # object type api_name
+    measure_column: str | None = None
+    base_filters: list[MetricFilterIn] = []
+    numerator_property: str | None = None
+    numerator_value: str | None = None
+    dimensions: list[MetricDimensionIn] = []
+    description_override: str | None = None
+
+
+class MetricDefIn(MetricDefBody):
+    """Create payload — carries the natural key (immutable thereafter)."""
+
+    key: str
+
+
+class MetricDefDimensionOut(BaseModel):
+    key: str
+    label: str
+    source: MetricDimensionSource
+
+
+class MetricDefOut(BaseModel):
+    """Full stored definition (for the admin edit form + write responses)."""
+
+    key: str
+    label: str
+    agg: str
+    unit: str
+    base_type: str
+    measure_column: str | None
+    base_filters: list[MetricFilterIn]
+    numerator_property: str | None
+    numerator_value: str | None
+    dimensions: list[MetricDefDimensionOut]
+    description_override: str | None
+    owner: str | None
+    # Set on a write when Cube schema regeneration failed; null otherwise.
+    warning: str | None = None
+
+
 class MetricQueryRequest(BaseModel):
     metric: str
     # None = overall value (single "整体" bucket); otherwise a dimension key.
