@@ -38,13 +38,19 @@ SYSTEM_PROMPT = """你是 HerosOneCore 数据平台的 AIP 助手，帮助用户
 """
 
 
-@lru_cache(maxsize=1)
-def get_agent():
+@lru_cache(maxsize=8)
+def get_agent(model_id: str | None = None):
+    """Build (and cache) the deep agent for the selected model.
+
+    Cached per model id so switching models in the UI doesn't rebuild the graph
+    on every turn. An unknown / None id resolves to the configured default.
+    """
+    profile = settings.resolve_llm_profile(model_id)
     llm = ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
-        timeout=settings.llm_timeout_seconds,
+        model=profile.model,
+        api_key=profile.api_key,
+        base_url=profile.base_url,
+        timeout=profile.timeout_seconds,
         streaming=True,
     )
     return create_deep_agent(model=llm, tools=AGENT_TOOLS, system_prompt=SYSTEM_PROMPT)

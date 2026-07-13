@@ -8,14 +8,21 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.repositories import store
-from app.schemas.chat import MessageOut, MetaOut, SessionOut
+from app.schemas.chat import MessageOut, MetaOut, ModelInfo, SessionOut
 
 router = APIRouter()
 
 
 @router.get("/meta", response_model=MetaOut)
 def get_meta() -> MetaOut:
-    return MetaOut(model=settings.llm_model, display_name=settings.llm_display_name)
+    profiles = settings.list_llm_profiles()
+    default = settings.resolve_llm_profile(None)
+    return MetaOut(
+        model=default.model,
+        display_name=default.display_name,
+        default=default.id,
+        models=[ModelInfo(id=p.id, display_name=p.display_name) for p in profiles],
+    )
 
 
 @router.get("/sessions", response_model=list[SessionOut])

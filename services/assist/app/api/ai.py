@@ -38,19 +38,21 @@ router = APIRouter()
 # --- Shared LLM helper --------------------------------------------------------
 
 
-@lru_cache(maxsize=1)
-def _get_llm() -> ChatOpenAI:
+@lru_cache(maxsize=8)
+def _get_llm(model_id: str | None = None) -> ChatOpenAI:
     """A non-streaming, low-temperature chat model coaxed into strict JSON.
 
-    Built lazily (like app/agent/build.py) so importing this module never
-    requires the LLM settings to be present. response_format=json_object nudges
-    DeepSeek toward valid JSON; callers still strip fences defensively.
+    Built lazily (like app/agent/build.py) and cached per model id so callers
+    can pick a model. response_format=json_object nudges the model toward valid
+    JSON; callers still strip fences defensively. An unknown / None id resolves
+    to the configured default.
     """
+    profile = settings.resolve_llm_profile(model_id)
     return ChatOpenAI(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        base_url=settings.llm_base_url,
-        timeout=settings.llm_timeout_seconds,
+        model=profile.model,
+        api_key=profile.api_key,
+        base_url=profile.base_url,
+        timeout=profile.timeout_seconds,
         temperature=0.1,
         streaming=False,
         model_kwargs={"response_format": {"type": "json_object"}},
@@ -70,13 +72,13 @@ def _strip_fences(text: str) -> str:
     return s.strip()
 
 
-def _invoke_json(system_prompt: str, human_payload: str) -> dict:
+def _invoke_json(system_prompt: str, human_payload: str, model_id: str | None = None) -> dict:
     """Invoke the LLM and parse its reply as a JSON object.
 
     Network / LLM failures raise 502; a non-JSON reply also raises 502 with a
     friendly Chinese detail (no retry loop).
     """
-    llm = _get_llm()
+    llm = _get_llm(model_id)
     try:
         reply = llm.invoke(
             [SystemMessage(content=system_prompt), HumanMessage(content=human_payload)]
@@ -113,6 +115,8 @@ _METRIC_QUERY_SYSTEM = """你是一个数据平台的「指标选择器」。给
 
 class MetricQueryBody(BaseModel):
     question: str = Field(min_length=1, max_length=500)
+    # Optional: which selectable model to use; None → the service default.
+    model: str | None = None
 
 
 @router.post("/ai/metric-query")
@@ -144,7 +148,7 @@ def metric_query(body: MetricQueryBody) -> dict:
     payload = json.dumps(
         {"catalog": compact, "question": body.question}, ensure_ascii=False
     )
-    data = _invoke_json(_METRIC_QUERY_SYSTEM, payload)
+    data = _invoke_json(_METRIC_QUERY_SYSTEM, payload, body.model)
 
     # The model may legitimately decide no metric fits — a normal outcome the
     # frontend renders inline, so pass it through with a 200.
@@ -215,6 +219,8 @@ class InterpretBody(BaseModel):
     matched_rows: int | None = None
     rows: list[InterpretRow] = Field(default_factory=list)
     question: str | None = None
+    # Optional: which selectable model to use; None → the service default.
+    model: str | None = None
 
 
 @router.post("/ai/interpret")
@@ -232,7 +238,7 @@ def interpret(body: InterpretBody) -> dict:
         },
         ensure_ascii=False,
     )
-    data = _invoke_json(_INTERPRET_SYSTEM, payload)
+    data = _invoke_json(_INTERPRET_SYSTEM, payload, body.model)
     text = data.get("text")
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(status_code=502, detail="AI 未能生成解读，请重试")

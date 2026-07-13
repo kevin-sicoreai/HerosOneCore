@@ -73,6 +73,27 @@ export type AiInterpretRequest = {
   question?: string | null
 }
 
+// A selectable LLM the assist service can drive (from GET /meta).
+export type ModelInfo = {
+  id: string
+  display_name: string
+}
+
+// Which model the user picked, persisted per-browser (like Claude Code's model
+// switch). Read as the default for every assist call so a choice made in the
+// AIP 助手 also applies to the analysis workbench's AI features.
+const MODEL_STORE_KEY = "herosonecore_assist_model"
+
+export function getSelectedModel(): string | undefined {
+  if (typeof window === "undefined") return undefined
+  return window.localStorage.getItem(MODEL_STORE_KEY) ?? undefined
+}
+
+export function setSelectedModel(id: string): void {
+  if (typeof window === "undefined") return
+  window.localStorage.setItem(MODEL_STORE_KEY, id)
+}
+
 export type ChatSession = {
   id: string
   title: string
@@ -107,7 +128,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const assistApi = {
-  meta: () => req<{ model: string; display_name: string }>("/meta"),
+  meta: () =>
+    req<{ model: string; display_name: string; default: string; models: ModelInfo[] }>("/meta"),
   sessions: () => req<ChatSession[]>("/sessions"),
   createSession: () => req<ChatSession>("/sessions", { method: "POST" }),
   deleteSession: (id: string) => req<void>(`/sessions/${id}`, { method: "DELETE" }),
@@ -115,17 +137,17 @@ export const assistApi = {
 
   // Translate a natural-language question into a metric query config (the
   // frontend then executes it via analysisApi.queryMetric with the user token).
-  aiMetricQuery: (question: string) =>
+  aiMetricQuery: (question: string, model = getSelectedModel()) =>
     req<AiMetricQueryResult>("/ai/metric-query", {
       method: "POST",
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, model }),
     }),
 
   // Ask the assist service to narrate a set of already-masked aggregate rows.
-  aiInterpret: (body: AiInterpretRequest) =>
+  aiInterpret: (body: AiInterpretRequest, model = getSelectedModel()) =>
     req<{ text: string }>("/ai/interpret", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, model }),
     }),
 
   // POSTs the user message and feeds parsed SSE events to the callback until
@@ -133,12 +155,13 @@ export const assistApi = {
   async chatStream(
     sessionId: string,
     content: string,
-    onEvent: (e: StreamEvent) => void
+    onEvent: (e: StreamEvent) => void,
+    model = getSelectedModel()
   ): Promise<void> {
     const res = await fetch(`${ASSIST_API}/sessions/${sessionId}/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, model }),
     })
     if (!res.ok || !res.body) throw new Error(`${res.status} ${await res.text()}`)
 

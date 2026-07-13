@@ -19,10 +19,13 @@ import remarkGfm from "remark-gfm"
 
 import {
   assistApi,
+  getSelectedModel,
+  setSelectedModel as persistModel,
   timeAgo,
   type ChartPayload,
   type ChatExtras,
   type ChatSession,
+  type ModelInfo,
   type TraceIcon,
   type TraceStep,
 } from "@/lib/assist-api"
@@ -72,15 +75,33 @@ function AssistInner() {
   const [activeId, setActiveId] = React.useState<string | null>(null)
   const [messages, setMessages] = React.useState<UIMessage[]>([])
   const [input, setInput] = React.useState("")
-  const [modelName, setModelName] = React.useState("")
+  const [models, setModels] = React.useState<ModelInfo[]>([])
+  const [selectedModel, setSelectedModel] = React.useState<string>("")
   const [offline, setOffline] = React.useState(false)
   const [streaming, setStreaming] = React.useState(false)
   const scrollRef = React.useRef<HTMLDivElement>(null)
 
+  // Display name of the active model, shown as the trace badge.
+  const modelName = models.find((m) => m.id === selectedModel)?.display_name ?? ""
+
   React.useEffect(() => {
-    assistApi.meta().then((m) => setModelName(m.display_name)).catch(() => setOffline(true))
+    assistApi
+      .meta()
+      .then((m) => {
+        setModels(m.models)
+        // Honor a previously-saved choice if it's still offered; else default.
+        const saved = getSelectedModel()
+        const initial = m.models.some((x) => x.id === saved) ? saved! : m.default
+        setSelectedModel(initial)
+      })
+      .catch(() => setOffline(true))
     assistApi.sessions().then(setSessions).catch(() => setOffline(true))
   }, [])
+
+  function changeModel(id: string) {
+    setSelectedModel(id)
+    persistModel(id)
+  }
 
   React.useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -190,7 +211,7 @@ function AssistInner() {
         } else if (ev.type === "error") {
           patch((m) => ({ ...m, streaming: false, error: ev.message }))
         }
-      })
+      }, selectedModel || undefined)
       patch((m) => ({ ...m, streaming: false }))
     } catch (e) {
       setMessages((prev) =>
@@ -231,6 +252,30 @@ function AssistInner() {
 
       {/* Conversation */}
       <div className="flex min-h-0 flex-1 flex-col">
+        {/* Top bar: title + model switcher (like Claude Code's model select) */}
+        <div className="flex items-center justify-between gap-2 border-b border-border px-6 py-2">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            <BotIcon className="size-4 text-emerald-500" /> AIP 助手
+          </div>
+          {models.length > 0 && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CpuIcon className="size-3.5" /> 模型
+              <select
+                value={selectedModel}
+                onChange={(e) => changeModel(e.target.value)}
+                disabled={streaming}
+                title={streaming ? "回答生成中，暂不可切换" : "切换回答所用的模型"}
+                className="rounded-md border border-input bg-muted/40 px-2 py-1 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 disabled:opacity-60"
+              >
+                {models.map((mm) => (
+                  <option key={mm.id} value={mm.id}>
+                    {mm.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-6 overflow-auto p-6">
           {messages.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center gap-4">

@@ -23,8 +23,19 @@ class MessageOut(BaseModel):
 
 class ChatRequest(BaseModel):
     content: str
+    # Optional: which selectable model to drive this turn; None → default.
+    model: str | None = None
+
+
+class ModelInfo(BaseModel):
+    id: str
+    display_name: str
 
 
 class MetaOut(BaseModel):
+    # `model`/`display_name` describe the default model (kept for backward
+    # compatibility); `models`/`default` expose the full selectable set.
     model: str
     display_name: str
+    default: str
+    models: list[ModelInfo]

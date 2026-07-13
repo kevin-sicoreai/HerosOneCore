@@ -150,8 +150,10 @@ async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)
         if m.content
     ]
 
+    profile = settings.resolve_llm_profile(body.model)
+
     async def gen() -> AsyncIterator[str]:
-        agent = get_agent()
+        agent = get_agent(profile.id)
         trace: list[dict] = []
         sources: list[str] = []
         charts: list[dict] = []
@@ -173,7 +175,7 @@ async def chat(session_id: str, body: ChatRequest, db: Session = Depends(get_db)
                         step = {
                             "id": "model",
                             "icon": "model",
-                            "text": f"调用 {settings.llm_display_name} 生成回答",
+                            "text": f"调用 {profile.display_name} 生成回答",
                             "meta": "",
                             "status": "running",
                         }
