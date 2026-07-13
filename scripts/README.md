@@ -15,9 +15,12 @@ scripts/
 │                              pipeline marts -> ontology -> governance -> labels
 └── services/                  start the FastAPI services (dev/prod by APP_ENV)
     ├── start_all.sh           all seven, logs under /tmp/hr-<svc>.log
-    └── start_<svc>.sh         auth :8005 / data :8000 / pipeline :8001 /
-                               ontology :8003 / governance :8004 /
-                               analysis :8008 / assist :8006
+    ├── start_<svc>.sh         auth :8005 / data :8000 / pipeline :8001 /
+    │                          ontology :8003 / governance :8004 /
+    │                          analysis :8008 / assist :8006
+    └── start_web.sh           Next.js frontend :$WEB_PORT — dev profile runs
+                               `next dev`, prod runs `next build` + `next start`;
+                               service URLs come from the profile's *_API_URL
 ```
 
 ## Typical flows
@@ -25,6 +28,7 @@ scripts/
 ```bash
 # start everything against the dev namespace (server middleware)
 APP_ENV=dev ./scripts/services/start_all.sh
+APP_ENV=dev ./scripts/services/start_web.sh
 
 # seed + bootstrap the operations scenario (idempotent)
 APP_ENV=dev ./scripts/seed/seed_ops.sh
