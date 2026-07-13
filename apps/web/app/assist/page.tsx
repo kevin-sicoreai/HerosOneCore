@@ -39,9 +39,9 @@ const TRACE_ICON: Record<TraceIcon, React.ElementType> = {
 }
 
 const SUGGESTIONS = [
-  "哪个类别的客服工单最多？",
-  "各状态的订单销售额分布如何？",
-  "维保工单主要集中在哪些故障类别？",
+  "客服工单反映出哪些服务短板？该优先改进什么？",
+  "订单履约是否健康？哪些状态存在积压或流失风险？",
+  "设备与维保的运营压力集中在哪里？该重点治理什么？",
 ]
 
 type UIMessage = {
