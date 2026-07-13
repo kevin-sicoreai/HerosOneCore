@@ -9,7 +9,6 @@ import {
   ChevronUpIcon,
   FilterIcon,
   Loader2Icon,
-  MapIcon,
   PlusIcon,
   RadarIcon,
   TableIcon,
@@ -36,13 +35,12 @@ import { Pagination } from "@/components/ui/pagination"
 
 // A lens is one way of looking at the current object set. The relationship
 // (schema) graph lives in the ontology manager, not here.
-type Lens = "table" | "chart" | "timeline" | "map"
+type Lens = "table" | "chart" | "timeline"
 
 const LENSES: { key: Lens; label: string; icon: React.ElementType }[] = [
   { key: "table", label: "表格", icon: TableIcon },
   { key: "chart", label: "图表", icon: BarChart3Icon },
   { key: "timeline", label: "时间轴", icon: CalendarClockIcon },
-  { key: "map", label: "地图", icon: MapIcon },
 ]
 
 // Detail-table server-side page size. The timeline pulls a small newest-first
@@ -67,7 +65,7 @@ const OP_OPTIONS: { value: FilterOp; label: string }[] = [
 ]
 
 const SELECT_BASE =
-  "rounded-md border border-border bg-transparent px-2 py-1.5 text-sm outline-none focus:border-emerald-500/60"
+  "rounded-md border border-border bg-transparent px-2 py-1.5 text-sm outline-none focus:border-blue-500/60"
 // Full-width variant for single-column selects. Fixed/flex selects use
 // SELECT_BASE directly to avoid a w-full vs w-* class conflict.
 const SELECT_CLASS = `w-full ${SELECT_BASE}`
@@ -114,8 +112,6 @@ export default function AnalysisPage() {
   const [loading, setLoading] = React.useState(false)
   // Timeline: a small newest-first slice fetched on demand (not the full set).
   const [timelineRows, setTimelineRows] = React.useState<Record<string, unknown>[]>([])
-  // Map: server-side count-per-geo aggregate, {value,count} per location.
-  const [geoCounts, setGeoCounts] = React.useState<{ value: string; count: number }[]>([])
   const [lens, setLens] = React.useState<Lens>("table")
   // Chart (cube-metric) lens state.
   const [chartMetricKey, setChartMetricKey] = React.useState<string>("")
@@ -129,7 +125,6 @@ export default function AnalysisPage() {
   // Capability detection on the current object type's columns / metrics.
   const timeCol =
     table?.columns.find((c) => c.data_type && /^(DATE|TIMESTAMP)/i.test(c.data_type)) ?? null
-  const geoCol = table?.columns.find((c) => c.name === "city" || c.name === "region") ?? null
   // Metrics whose base object type is the current object type.
   const chartMetrics = React.useMemo(
     () => allMetrics.filter((m) => m.base_type === tableName),
@@ -141,12 +136,10 @@ export default function AnalysisPage() {
     (l: Lens) =>
       l === "timeline"
         ? !!timeCol
-        : l === "map"
-          ? !!geoCol
-          : l === "chart"
-            ? chartMetrics.length > 0
-            : true,
-    [timeCol, geoCol, chartMetrics]
+        : l === "chart"
+          ? chartMetrics.length > 0
+          : true,
+    [timeCol, chartMetrics]
   )
 
   // Load the catalog + metric definitions, select the first table.
@@ -256,34 +249,6 @@ export default function AnalysisPage() {
     return () => window.clearTimeout(timer)
   }, [lens, tableName, filters, timeCol])
 
-  // Map lens: server-side count-per-geo aggregate (small payload) instead of
-  // counting a full detail set on the client.
-  React.useEffect(() => {
-    if (lens !== "map" || !tableName || !geoCol) {
-      setGeoCounts([])
-      return
-    }
-    const timer = window.setTimeout(() => {
-      analysisApi
-        .analyze({
-          table: tableName,
-          group_by: geoCol.name,
-          metrics: [{ field: geoCol.name, agg: "count" }],
-          filters: filters.filter((f) => String(f.value).trim() !== ""),
-        })
-        .then((r) =>
-          setGeoCounts(
-            r.rows.map((row) => ({
-              value: String(row.group ?? ""),
-              count: Number(row.m0 ?? 0),
-            }))
-          )
-        )
-        .catch(() => setOffline(true))
-    }, 300)
-    return () => window.clearTimeout(timer)
-  }, [lens, tableName, filters, geoCol])
-
   // Chart lens: query the selected cube metric (debounced) on any change.
   React.useEffect(() => {
     if (lens !== "chart" || !chartMetricKey) {
@@ -302,13 +267,6 @@ export default function AnalysisPage() {
     }, 300)
     return () => window.clearTimeout(timer)
   }, [lens, chartMetricKey, chartDimKey, filters])
-
-  // Drill from the map into the detail table filtered to one geo value.
-  function drillGeo(value: string) {
-    if (!geoCol) return
-    setFilters([{ field: geoCol.name, op: "eq", value }])
-    setLens("table")
-  }
 
   // Cycle a detail column's sort on header click: none → asc → desc → none.
   // Any sort change resets to the first page so the pager never lands out of range.
@@ -336,16 +294,14 @@ export default function AnalysisPage() {
     <PageContainer className="h-full">
       <PageHeading
         title="分析工作台"
-        desc="围绕对象集的指标、图表、时间轴与地理分析"
+        desc="围绕对象集的指标、图表与时间轴分析"
         icon={<RadarIcon />}
         actions={
           offline ? (
             <Badge variant="warning">
               <WifiOffIcon /> 分析服务未启动
             </Badge>
-          ) : (
-            <Badge variant="brand">数据分析</Badge>
-          )
+          ) : null
         }
       />
 
@@ -373,7 +329,7 @@ export default function AnalysisPage() {
                       title={t.desc}
                       className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
                         active
-                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
                           : "hover:bg-muted"
                       }`}
                     >
@@ -393,7 +349,7 @@ export default function AnalysisPage() {
               <button
                 onClick={addFilter}
                 disabled={!table}
-                className="ml-auto inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+                className="ml-auto inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5 text-xs hover:border-blue-500/40 hover:text-foreground disabled:opacity-50"
               >
                 <PlusIcon className="size-3" /> 添加过滤
               </button>
@@ -487,7 +443,7 @@ export default function AnalysisPage() {
 
         {/* ---- Right canvas: lens switcher + compact stats + the data view. ---- */}
         <div className="flex min-h-0 flex-col gap-3">
-          {/* Thin top bar: lens switcher on the left, context hint on the right. */}
+          {/* Thin top bar: lens switcher. */}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
               {LENSES.map((l) => {
@@ -495,11 +451,9 @@ export default function AnalysisPage() {
                 const disabledTitle =
                   l.key === "timeline"
                     ? "当前对象类型无时间属性"
-                    : l.key === "map"
-                      ? "当前对象类型无地理属性"
-                      : l.key === "chart"
-                        ? "当前对象类型无可用指标"
-                        : undefined
+                    : l.key === "chart"
+                      ? "当前对象类型无可用指标"
+                      : undefined
                 return (
                   <button
                     key={l.key}
@@ -517,11 +471,6 @@ export default function AnalysisPage() {
                 )
               })}
             </div>
-            <div className="ml-auto truncate text-xs text-muted-foreground">
-              {table
-                ? `分析上下文：${table.label} · 命中 ${(result?.matched_rows ?? 0).toLocaleString()} 行`
-                : ""}
-            </div>
           </div>
 
           {/* Compact stat strip — the former big stat cards, squeezed to one line. */}
@@ -537,8 +486,8 @@ export default function AnalysisPage() {
                   Old rows stay visible (dimmed) so the table never flashes empty. */}
               {loading && (
                 <>
-                  <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 animate-pulse rounded-t-xl bg-emerald-500/70" />
-                  <Loader2Icon className="pointer-events-none absolute top-2 right-2 z-10 size-4 animate-spin text-emerald-500" />
+                  <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 animate-pulse rounded-t-xl bg-blue-500/70" />
+                  <Loader2Icon className="pointer-events-none absolute top-2 right-2 z-10 size-4 animate-spin text-blue-500" />
                 </>
               )}
               <div
@@ -581,12 +530,6 @@ export default function AnalysisPage() {
               {timeCol ? (
                 <TimelineView rows={timelineRows} columns={table?.columns ?? []} timeCol={timeCol} />
               ) : null}
-            </div>
-          )}
-
-          {lens === "map" && (
-            <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-              {geoCol ? <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} /> : null}
             </div>
           )}
         </div>
@@ -634,7 +577,7 @@ function TableControls({
         {measures.length > 0 && metrics.length < 3 && (
           <button
             onClick={() => setMetrics((m) => [...m, { field: measures[0].name, agg: "sum" }])}
-            className="ml-auto inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5 text-xs hover:border-emerald-500/40 hover:text-foreground"
+            className="ml-auto inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5 text-xs hover:border-blue-500/40 hover:text-foreground"
           >
             <PlusIcon className="size-3" /> 添加度量
           </button>
@@ -832,7 +775,7 @@ function ChartCanvas({
                 </div>
                 <div className="relative h-6 min-w-0 flex-1 rounded-md bg-muted/40">
                   <div
-                    className="h-full rounded-md bg-emerald-500/80 transition-colors group-hover:bg-emerald-500"
+                    className="h-full rounded-md bg-blue-500/80 transition-colors group-hover:bg-blue-500"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -917,7 +860,7 @@ function ResultTable({
                   <td
                     key={c.name}
                     className={`px-4 py-2 ${numeric ? "text-right tabular-nums" : ""} ${
-                      ci === 0 ? "font-mono text-emerald-500" : ""
+                      ci === 0 ? "font-mono text-blue-500" : ""
                     }`}
                   >
                     <span className="inline-block max-w-[240px] truncate align-middle" title={String(raw)}>
@@ -1003,7 +946,7 @@ function TimelineView({
       <ol className="relative mx-auto max-w-2xl space-y-5 border-l-2 border-border pl-6">
         {shown.map((t, i) => (
           <li key={i} className="relative">
-            <span className="absolute -left-[31px] top-1 flex size-4 items-center justify-center rounded-full bg-emerald-500 ring-4 ring-card" />
+            <span className="absolute -left-[31px] top-1 flex size-4 items-center justify-center rounded-full bg-blue-500 ring-4 ring-card" />
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs text-muted-foreground">{t.time}</span>
             </div>
@@ -1012,87 +955,6 @@ function TimelineView({
           </li>
         ))}
       </ol>
-    </div>
-  )
-}
-
-// Approximate percentage coordinates for the demo map (not a real projection);
-// they roughly mirror each location's relative position within China.
-const GEO_COORDS: Record<string, { x: number; y: number }> = {
-  上海: { x: 78, y: 58 },
-  北京: { x: 66, y: 30 },
-  广州: { x: 68, y: 82 },
-  成都: { x: 38, y: 62 },
-  武汉: { x: 62, y: 58 },
-  西安: { x: 50, y: 44 },
-  沈阳: { x: 78, y: 20 },
-  杭州: { x: 77, y: 62 },
-  深圳: { x: 70, y: 84 },
-  重庆: { x: 45, y: 62 },
-  华东: { x: 75, y: 58 },
-  华北: { x: 64, y: 30 },
-  华南: { x: 68, y: 82 },
-  西南: { x: 42, y: 62 },
-  海外: { x: 90, y: 88 },
-}
-
-// Map: geo counts computed server-side (count aggregate grouped by the geo
-// property); click a point to drill in.
-function MapView({
-  counts,
-  geoCol,
-  onDrill,
-}: {
-  counts: { value: string; count: number }[]
-  geoCol: AnalysisColumn
-  onDrill: (value: string) => void
-}) {
-  const known: { value: string; count: number; x: number; y: number }[] = []
-  const unknown: { value: string; count: number }[] = []
-  for (const { value, count } of counts) {
-    if (value.trim() === "") continue
-    const c = GEO_COORDS[value]
-    if (c) known.push({ value, count, x: c.x, y: c.y })
-    else unknown.push({ value, count })
-  }
-  // Point size buckets by count.
-  const sizeFor = (n: number) => (n <= 5 ? 8 : n <= 50 ? 14 : 22)
-
-  return (
-    <div className="relative h-full min-h-[440px] overflow-hidden bg-[linear-gradient(var(--color-border)_1px,transparent_1px),linear-gradient(90deg,var(--color-border)_1px,transparent_1px)] [background-size:40px_40px]">
-      <div className="absolute inset-0 bg-gradient-to-br from-sky-500/5 to-emerald-500/5" />
-      <div className="absolute top-3 left-3 rounded-lg border border-border bg-card/90 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur">
-        <MapIcon className="mr-1 inline size-3.5" /> 地理分布 · {known.length} 个位置 · 按 {geoCol.label}
-      </div>
-      {known.map((p) => {
-        const size = sizeFor(p.count)
-        return (
-          <button
-            key={p.value}
-            className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1"
-            style={{ left: `${p.x}%`, top: `${p.y}%` }}
-            onClick={() => onDrill(p.value)}
-            title={`下钻到 ${p.value}`}
-          >
-            <span className="block rounded-full bg-emerald-500" style={{ width: size, height: size }} />
-            <span className="whitespace-nowrap text-xs text-foreground">
-              {p.value} · {p.count}
-            </span>
-          </button>
-        )
-      })}
-      {unknown.length > 0 && (
-        <div className="absolute right-3 bottom-3 left-3 flex flex-wrap gap-1.5">
-          {unknown.map((u) => (
-            <span
-              key={u.value}
-              className="rounded-md border border-border bg-card/90 px-2 py-0.5 text-xs text-muted-foreground backdrop-blur"
-            >
-              未识别位置：{u.value} · {u.count}
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

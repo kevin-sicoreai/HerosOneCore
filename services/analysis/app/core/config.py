@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # Analysis reads the built ontology (object types), not raw datasets.
     # 127.0.0.1, not localhost: on Windows, resolving "localhost" tries IPv6
     # first and adds ~2s per request before falling back to IPv4.
-    ontology_service_url: str = "http://127.0.0.1:8003"
+    ontology_service_url: str
 
     log_level: str = "INFO"
 

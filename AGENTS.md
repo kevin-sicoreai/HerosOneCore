@@ -1,4 +1,4 @@
-# AskDelphi
+# HerosOneCore
 
 A Palantir Foundry–style **data + AI platform** prototype. The frontend is implemented; the backend microservices are at the directory-skeleton stage (mostly empty dirs + `.gitkeep`).
 
@@ -78,5 +78,5 @@ npm run dev        # http://localhost:3000
 
 ## Git
 
-- Remote: `git@github-sicore:kevin-sicoreai/AskDelphi.git` (SSH over port 443 to bypass the local proxy).
+- Remote: `git@github-sicore:kevin-sicoreai/HerosOneCore.git` (SSH over port 443 to bypass the local proxy).
 - Private repo; collaboration via collaborators.

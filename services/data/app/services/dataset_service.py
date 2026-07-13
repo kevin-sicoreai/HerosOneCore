@@ -87,7 +87,9 @@ def update(db: Session, dataset_id: str, payload: DatasetPatch) -> Dataset:
 
 def preview(db: Session, dataset_id: str, limit: int | None = None) -> dict:
     dataset = get_or_404(db, dataset_id)
-    if not os.path.exists(dataset.storage_uri):
+    # Local files can be checked cheaply; s3:// objects are validated by DuckDB
+    # itself when the preview query runs.
+    if not dataset.storage_uri.startswith("s3://") and not os.path.exists(dataset.storage_uri):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Dataset has no materialized data yet; run a sync first",

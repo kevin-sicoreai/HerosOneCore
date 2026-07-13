@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "sqlite:///./auth.db"
+    # No default: config comes exclusively from the unified profile
+    # (scripts/env.sh) — a missing key must fail startup.
+    database_url: str
 
     # HS256 signing secret for JWTs. Override in real deployments.
     jwt_secret: str = "dev-secret-change-me"

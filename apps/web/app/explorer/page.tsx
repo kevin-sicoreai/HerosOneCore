@@ -22,7 +22,7 @@ import { Pagination } from "@/components/ui/pagination"
 
 // Ontology node color -> Tailwind border/text classes (same map as the ontology page).
 const COLOR: Record<string, string> = {
-  emerald: "border-emerald-500/60 text-emerald-500",
+  emerald: "border-blue-500/60 text-blue-500",
   sky: "border-sky-500/60 text-sky-500",
   violet: "border-violet-500/60 text-violet-500",
   amber: "border-amber-500/60 text-amber-500",
@@ -116,7 +116,7 @@ export default function ExplorerPage() {
                   onClick={() => selectType(t.id)}
                   className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
                     selectedTypeId === t.id
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
                       : "hover:bg-muted"
                   }`}
                 >
@@ -324,7 +324,7 @@ function InstanceList({
             <button
               key={`${col}:${value}`}
               onClick={() => toggleFacet(col, value)}
-              className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+              className="inline-flex items-center gap-1 rounded-md border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 text-xs text-blue-600 transition-colors hover:bg-blue-500/20 dark:text-blue-400"
             >
               <span className="text-muted-foreground">{fieldLabel(col)}:</span>
               {value}
@@ -373,7 +373,7 @@ function InstanceList({
                         className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
                       >
                         {columns.map((c, j) => (
-                          <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
+                          <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-blue-500" : "px-3 py-2"}>
                             {String(r[c] ?? "")}
                           </td>
                         ))}
@@ -421,7 +421,7 @@ function InstanceList({
                           onClick={() => toggleFacet(f.col, v.value)}
                           className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-xs transition-colors ${
                             on
-                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
                               : "hover:bg-muted"
                           }`}
                         >
@@ -436,7 +436,7 @@ function InstanceList({
                       onClick={() =>
                         setExpandedFacets((prev) => ({ ...prev, [f.col]: !prev[f.col] }))
                       }
-                      className="mt-0.5 px-2 text-xs text-emerald-600 transition-colors hover:underline dark:text-emerald-400"
+                      className="mt-0.5 px-2 text-xs text-blue-600 transition-colors hover:underline dark:text-blue-400"
                     >
                       {expanded ? "收起" : `还有 ${hidden} 项`}
                     </button>
@@ -721,7 +721,7 @@ function RelationBlock({
         <button
           onClick={viewAll}
           disabled={expanding}
-          className="flex w-full items-center justify-center gap-1 border-t border-border px-4 py-2 text-xs text-emerald-600 transition-colors hover:bg-muted/40 disabled:opacity-50 dark:text-emerald-400"
+          className="flex w-full items-center justify-center gap-1 border-t border-border px-4 py-2 text-xs text-blue-600 transition-colors hover:bg-muted/40 disabled:opacity-50 dark:text-blue-400"
         >
           {expanding ? (
             <>

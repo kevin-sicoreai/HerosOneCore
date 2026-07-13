@@ -7,7 +7,6 @@ import { authApi, clearToken, getToken } from "@/lib/auth-api"
 import { AppSidebar } from "@/components/app-sidebar"
 import { TopBar } from "@/components/top-bar"
 import { ResourceDrawerProvider } from "@/components/resource-detail-drawer"
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
@@ -51,16 +50,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ResourceDrawerProvider>
-      <SidebarProvider>
+      <div className="flex h-svh w-full overflow-hidden bg-background">
         <AppSidebar />
-        {/* h-svh caps the inset at the viewport so the content area scrolls
-            internally — pages with a pinned footer (e.g. the assist input) stay
-            visible instead of being pushed below the fold as content grows. */}
-        <SidebarInset className="h-svh min-w-0 overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
           <div className="min-h-0 flex-1 overflow-auto">{children}</div>
-        </SidebarInset>
-      </SidebarProvider>
+        </div>
+      </div>
     </ResourceDrawerProvider>
   )
 }

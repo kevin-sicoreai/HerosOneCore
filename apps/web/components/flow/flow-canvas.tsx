@@ -37,7 +37,8 @@ import { layoutWithDagre } from "./flow-layout"
 // A double rAF lands after the controlled-nodes commit; the timeout is a
 // belt-and-suspenders fallback for slower renders.
 function fitSoon(rf: ReturnType<typeof useReactFlow>) {
-  const fit = () => rf.fitView({ padding: 0.2, duration: 300 })
+  // Cap zoom so a small graph doesn't blow nodes up to fill the viewport.
+  const fit = () => rf.fitView({ padding: 0.2, duration: 300, maxZoom: 1 })
   requestAnimationFrame(() => requestAnimationFrame(fit))
   window.setTimeout(fit, 200)
 }
@@ -116,7 +117,7 @@ function Toolbar({
       <Button
         size="xs"
         variant="outline"
-        onClick={() => rf.fitView({ padding: 0.2, duration: 300 })}
+        onClick={() => rf.fitView({ padding: 0.2, duration: 300, maxZoom: 1 })}
       >
         <MaximizeIcon /> 适应
       </Button>
@@ -147,6 +148,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
           snapToGrid
           snapGrid={[16, 16]}
           fitView
+          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           minZoom={0.2}
           defaultEdgeOptions={{
             markerEnd: { type: MarkerType.ArrowClosed },

@@ -7,8 +7,9 @@ import { AppShell } from "@/components/app-shell"
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
-  title: "AskDelphi",
-  description: "数据智能平台",
+  title: "HerosOne Core",
+  description: "企业级数据智能核心平台",
+  icons: { icon: "/icon.svg" },
 }
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'})

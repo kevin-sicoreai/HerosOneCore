@@ -14,19 +14,18 @@ import {
   type OnConnect,
   type OnNodeDrag,
 } from "@xyflow/react"
-import { KeyIcon, PlusIcon, RefreshCwIcon, Share2Icon, TableIcon, Trash2Icon } from "lucide-react"
+import { KeyIcon, PlusIcon, RefreshCwIcon, Share2Icon, Trash2Icon, XIcon } from "lucide-react"
 
 import { dataApi, type Dataset } from "@/lib/data-api"
 import {
   ontologyApi,
   type GraphLink,
   type GraphNode,
-  type ObjectList,
   type ObjectTypeDetail,
   type OntologyGraph,
 } from "@/lib/ontology-api"
 import { FlowCanvas } from "@/components/flow/flow-canvas"
-import { PageContainer, PageHeading } from "@/components/page-container"
+import { PageContainer } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
@@ -36,7 +35,7 @@ const COLORS = ["emerald", "sky", "violet", "amber", "rose"]
 const CARDINALITIES = ["many_to_one", "one_to_many", "one_to_one", "many_to_many"]
 
 const COLOR: Record<string, string> = {
-  emerald: "border-emerald-500/60 text-emerald-500",
+  emerald: "border-blue-500/60 text-blue-500",
   sky: "border-sky-500/60 text-sky-500",
   violet: "border-violet-500/60 text-violet-500",
   amber: "border-amber-500/60 text-amber-500",
@@ -68,7 +67,7 @@ function ObjectTypeNode({ data, selected }: NodeProps) {
     <div
       className={`flex flex-col justify-center rounded-lg border-2 bg-card px-3 text-left shadow-sm ${
         COLOR[d.color] ?? COLOR.emerald
-      } ${selected ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : ""}`}
+      } ${selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-background" : ""}`}
       style={{ width: NODE_W, height: NODE_H }}
     >
       <Handle type="target" position={Position.Left} className="!size-2 !border-2 !border-border !bg-background" />
@@ -92,7 +91,6 @@ export default function OntologyPage() {
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const [detail, setDetail] = React.useState<ObjectTypeDetail | null>(null)
   const [panel, setPanel] = React.useState<Panel>("detail")
-  const [instances, setInstances] = React.useState<ObjectList | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
   // create form
@@ -113,9 +111,9 @@ export default function OntologyPage() {
   React.useEffect(() => {
     ;(async () => {
       try {
-        const [g, ds] = await Promise.all([loadGraph(), dataApi.datasets({ pageSize: 100 })])
+        const [, ds] = await Promise.all([loadGraph(), dataApi.datasets({ pageSize: 100 })])
         setDatasets(ds.items)
-        if (g.nodes[0]) setSelectedId(g.nodes[0].id)
+        // Don't auto-select a node on load — the detail popup opens only on click.
       } catch (e) {
         setError(e instanceof Error ? e.message : "加载失败")
       }
@@ -128,9 +126,8 @@ export default function OntologyPage() {
     setEdges(graph.links.map(linkToEdge))
   }, [graph, setNodes, setEdges])
 
-  // load selected object type detail + reset instance preview
+  // load selected object type detail
   React.useEffect(() => {
-    setInstances(null)
     if (!selectedId) {
       setDetail(null)
       return
@@ -237,34 +234,37 @@ export default function OntologyPage() {
     setSelectedId(null)
     await loadGraph()
   }
-  async function showInstances() {
-    if (!selectedId) return
-    setInstances(await ontologyApi.objects(selectedId))
-  }
 
   return (
-    <PageContainer>
-      <PageHeading
-        title="本体管理器"
-        desc="定义对象类型、关系与属性 —— 平台的语义核心"
-        icon={<Share2Icon />}
-        actions={
-          <>
+    <PageContainer className="h-full">
+      {/* One connected window: a grouped menu/toolbar bar on top, the canvas
+          nested seamlessly below — no floating gap between the two. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
+          {/* group: ontology context */}
+          <span className="text-xs font-medium text-muted-foreground">本体</span>
+          <Badge variant="outline">
+            {graph.nodes.length} 对象类型 · {graph.links.length} 关系
+          </Badge>
+
+          <div className="mx-1 h-5 w-px bg-border" />
+
+          {/* group: build */}
+          <Button size="sm" onClick={startCreate}><PlusIcon /> 新建对象类型</Button>
+          <span className="text-xs text-muted-foreground">拖拽对象右侧手柄连线可建立关系</span>
+
+          {/* group: global */}
+          <div className="ml-auto flex items-center gap-2">
+            {error && (
+              <span title={error} className="max-w-[220px] truncate text-xs text-danger">
+                {error}
+              </span>
+            )}
             <Button size="sm" variant="outline" onClick={loadGraph}><RefreshCwIcon /> 刷新</Button>
-            <Button size="sm" onClick={startCreate}><PlusIcon /> 新建对象类型</Button>
-          </>
-        }
-      />
+          </div>
+        </div>
 
-      {error && (
-        <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>
-      )}
-
-      <div className="flex">
-        <Badge variant="outline" className="ml-auto">拖对象右侧手柄到另一对象建关系 · 选中关系按 Delete 删除 · 滚轮缩放</Badge>
-      </div>
-
-      <div className="grid h-[clamp(380px,52vh,600px)] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="relative min-h-0 flex-1">
         <FlowCanvas
           nodes={nodes}
           edges={edges}
@@ -278,11 +278,15 @@ export default function OntologyPage() {
           onBeforeDelete={onBeforeDelete}
           onEdgesDelete={onEdgesDelete}
           direction="LR"
-          emptyHint="点右上角「新建对象类型」开始"
+          emptyHint="点上方「新建对象类型」开始"
         />
 
-        {/* Side panel */}
-        <div className="flex flex-col gap-3 overflow-auto rounded-xl border border-border bg-card p-4">
+        {/* selected element — floating inspector popup (not docked to the right) */}
+        {(panel !== "detail" || selectedNode) && (
+          <div className="absolute left-4 top-4 z-20 flex max-h-[calc(100%-2rem)] w-[320px] flex-col gap-3 overflow-auto rounded-xl border border-border bg-card p-4 shadow-lg">
+            <div className="-mb-2 flex justify-end">
+              <Button size="sm" variant="ghost" onClick={() => { setPanel("detail"); setSelectedId(null); setDetail(null) }}><XIcon /></Button>
+            </div>
           {panel === "create" && (
             <>
               <div className="text-xs font-semibold">新建对象类型</div>
@@ -372,33 +376,17 @@ export default function OntologyPage() {
                 ))}
               </div>
 
-              <Button size="sm" variant="outline" onClick={showInstances}><TableIcon /> 查看实例</Button>
-              {instances && (
-                <div className="overflow-auto rounded-md border border-border">
-                  <table className="w-full text-xs">
-                    <thead className="text-muted-foreground">
-                      <tr className="border-b border-border">
-                        {instances.columns.map((c) => <th key={c} className="px-2 py-1 text-left font-medium">{c}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {instances.rows.map((r, i) => (
-                        <tr key={i} className="border-b border-border/60 last:border-0">
-                          {instances.columns.map((c) => <td key={c} className="px-2 py-1">{String(r[c] ?? "")}</td>)}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <p className="text-[11px] text-muted-foreground">实例数据请在「对象浏览器」中查看。</p>
             </>
           ) : (
             <div className="text-sm text-muted-foreground">
               选择一个对象类型查看属性/实例。<br />
               拖对象右侧手柄到另一对象可建一条关系。<br />
-              点右上角「新建对象类型」添加。
+              点上方「新建对象类型」添加。
             </div>
           ))}
+          </div>
+        )}
         </div>
       </div>
     </PageContainer>

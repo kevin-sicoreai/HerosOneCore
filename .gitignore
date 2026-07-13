@@ -35,6 +35,8 @@ coverage/
 .env
 .env.*
 !.env.example
+config/*.env
+!config/example.env
 *.pem
 *.key
 

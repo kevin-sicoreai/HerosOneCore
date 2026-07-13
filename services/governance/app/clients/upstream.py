@@ -82,3 +82,14 @@ def list_object_types() -> list[dict]:
 # --- auth service ---
 def list_roles() -> list[dict]:
     return _get(settings.auth_api_url, "/roles") or []
+
+
+# --- detail lookups used by the catalog publisher ---
+def get_dataset(dataset_id: str) -> dict | None:
+    """Dataset detail including its column schema."""
+    return _get(settings.data_api_url, f"/datasets/{dataset_id}")
+
+
+def get_object_type(object_type_id: str) -> dict | None:
+    """Object-type detail including its properties."""
+    return _get(settings.ontology_api_url, f"/object-types/{object_type_id}")

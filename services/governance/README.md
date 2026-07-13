@@ -1,6 +1,6 @@
 # Governance Service
 
-Cross-cutting governance for AskDelphi. It does not own the assets — it
+Cross-cutting governance for HerosOneCore. It does not own the assets — it
 **aggregates** the data / pipeline / ontology services to produce a
 platform-wide lineage graph and an audit feed, plus a placeholder access matrix.
 

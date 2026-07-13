@@ -13,13 +13,14 @@ import os
 import re
 import shutil
 from typing import Any
+from urllib.parse import urlparse
 
 from app.core.config import settings
 from app.domain.dag import inputs_of
 from app.domain.enums import StepKind
 
 _PROFILE = "pipeline"
-_PROJECT_NAME = "askdelphi_pipeline"
+_PROJECT_NAME = "herosonecore_pipeline"
 
 
 def _san(name: str) -> str:
@@ -34,9 +35,38 @@ def _project_dir(pipeline_id: str) -> str:
 
 
 def _mart_uri(pipeline_id: str, output_name: str) -> str:
+    if settings.storage_backend == "s3":
+        return f"s3://{settings.s3_bucket}/mart/{pipeline_id}/{_san(output_name)}.parquet"
     base = os.path.abspath(os.path.join(settings.mart_dir, pipeline_id))
     os.makedirs(base, exist_ok=True)
     return os.path.join(base, f"{_san(output_name)}.parquet")
+
+
+def _profile_yaml(project_dir: str) -> str:
+    """dbt-duckdb profile; loads httpfs + S3 credentials when the data plane is S3."""
+    lines = [
+        f"{_PROFILE}:",
+        "  target: dev",
+        "  outputs:",
+        "    dev:",
+        "      type: duckdb",
+        f"      path: '{os.path.join(project_dir, 'warehouse.duckdb')}'",
+        "      threads: 1",
+    ]
+    if settings.storage_backend == "s3":
+        endpoint = urlparse(settings.s3_endpoint)
+        lines += [
+            "      extensions:",
+            "        - httpfs",
+            "      settings:",
+            f"        s3_endpoint: '{endpoint.netloc}'",
+            f"        s3_use_ssl: {'true' if endpoint.scheme == 'https' else 'false'}",
+            "        s3_url_style: 'path'",
+            f"        s3_access_key_id: '{settings.s3_access_key}'",
+            f"        s3_secret_access_key: '{settings.s3_secret_key}'",
+            f"        s3_region: '{settings.s3_region}'",
+        ]
+    return "\n".join(lines) + "\n"
 
 
 def _ref_for(input_id: str, steps_by_id: dict, source_table: dict[str, str]) -> str:
@@ -97,14 +127,7 @@ def compile_project(pipeline, steps, edges, source_meta: dict[str, dict]) -> dic
            "config-version: 2\n"
            f"profile: '{_PROFILE}'\n"
            'model-paths: ["models"]\n')
-    _write(project_dir, "profiles.yml",
-           f"{_PROFILE}:\n"
-           "  target: dev\n"
-           "  outputs:\n"
-           "    dev:\n"
-           "      type: duckdb\n"
-           f"      path: '{os.path.join(project_dir, 'warehouse.duckdb')}'\n"
-           "      threads: 1\n")
+    _write(project_dir, "profiles.yml", _profile_yaml(project_dir))
 
     # sources.yml
     src_lines = ["version: 2", "sources:", "  - name: raw", "    tables:"]

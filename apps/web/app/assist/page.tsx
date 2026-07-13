@@ -207,7 +207,7 @@ function AssistInner() {
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-6 overflow-auto p-6">
           {messages.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center gap-4">
-              <span className="flex size-12 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-500">
+              <span className="flex size-12 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-500">
                 <BotIcon className="size-6" />
               </span>
               <div className="text-sm text-muted-foreground">向 AIP 助手提问，推理过程与数据来源全程可见</div>
@@ -216,7 +216,7 @@ function AssistInner() {
                   <button
                     key={q}
                     onClick={() => send(q)}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:border-emerald-500/40"
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:border-blue-500/40"
                   >
                     {q}
                   </button>
@@ -228,7 +228,7 @@ function AssistInner() {
           {messages.map((m) =>
             m.role === "user" ? (
               <div key={m.key} className="flex justify-end">
-                <div className="max-w-lg rounded-2xl rounded-tr-sm bg-emerald-500/15 px-4 py-2.5 text-sm whitespace-pre-wrap">
+                <div className="max-w-lg rounded-2xl rounded-tr-sm bg-blue-500/15 px-4 py-2.5 text-sm whitespace-pre-wrap">
                   {m.content}
                 </div>
               </div>
@@ -275,7 +275,7 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
 
   return (
     <div className="flex gap-3">
-      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-500">
+      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-500">
         <BotIcon className="size-4.5" />
       </span>
       <div className="min-w-0 flex-1 space-y-3">
@@ -283,7 +283,7 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
         {m.trace.length > 0 && (
           <div className="rounded-xl border border-border bg-card p-3">
             <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <SparklesIcon className="size-3.5 text-emerald-500" /> 推理过程
+              <SparklesIcon className="size-3.5 text-blue-500" /> 推理过程
               {modelName && <Badge variant="brand" className="ml-1">{modelName}</Badge>}
             </div>
             <ol className="space-y-1.5">
@@ -291,11 +291,11 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
                 const Icon = TRACE_ICON[t.icon] ?? ZapIcon
                 return (
                   <li key={t.id} className="flex items-center gap-2 text-sm">
-                    <Icon className="size-4 shrink-0 text-emerald-500" />
+                    <Icon className="size-4 shrink-0 text-blue-500" />
                     <span className="flex-1">{t.text}</span>
                     <span className="text-xs text-muted-foreground">{t.meta}</span>
                     {t.status === "done" ? (
-                      <span className="text-emerald-500">✓</span>
+                      <span className="text-blue-500">✓</span>
                     ) : (
                       <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />
                     )}
@@ -311,7 +311,7 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
           {(m.content || m.streaming) && (
             <div className="markdown-answer">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-              {m.streaming && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-emerald-500 align-text-bottom" />}
+              {m.streaming && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-blue-500 align-text-bottom" />}
             </div>
           )}
           {m.error && (
@@ -328,12 +328,12 @@ function AssistantMessage({ message, modelName }: { message: UIMessage; modelNam
                 <button
                   key={s}
                   onClick={() => open({ name: s, kind: s.includes("pipeline") ? "管道" : "对象类型" })}
-                  className="rounded-md border border-border px-2 py-0.5 hover:border-emerald-500/40"
+                  className="rounded-md border border-border px-2 py-0.5 hover:border-blue-500/40"
                 >
                   {s}
                 </button>
               ))}
-              <span className="text-emerald-500">· 全部可溯源</span>
+              <span className="text-blue-500">· 全部可溯源</span>
             </div>
           )}
         </div>

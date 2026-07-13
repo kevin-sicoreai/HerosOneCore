@@ -29,6 +29,16 @@ class AuditEntry(BaseModel):
     source: str  # which subsystem the event came from
 
 
+class AuditPage(BaseModel):
+    """Paginated, filtered audit feed."""
+
+    items: list[AuditEntry]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
 class AuditEventIn(BaseModel):
     """Ingest payload posted by services on each successful write."""
 

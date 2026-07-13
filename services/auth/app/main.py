@@ -1,4 +1,4 @@
-"""AskDelphi auth service — FastAPI application entry point."""
+"""HerosOneCore auth service — FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
 
@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AskDelphi Auth Service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="HerosOneCore Auth Service", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 

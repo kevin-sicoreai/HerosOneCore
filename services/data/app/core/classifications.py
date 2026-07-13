@@ -13,6 +13,8 @@ import time
 
 import httpx
 
+from app.core.auth import service_headers
+
 # 127.0.0.1 (not "localhost") avoids a slow IPv6 resolution attempt on Windows.
 _GOVERNANCE_URL = os.environ.get("GOVERNANCE_API_URL", "http://127.0.0.1:8004")
 _CACHE_TTL_SECONDS = 30.0
@@ -26,7 +28,10 @@ def _all_classifications() -> list[dict]:
     if _cache["rows"] and now - _cache["at"] < _CACHE_TTL_SECONDS:
         return _cache["rows"]
     try:
-        resp = httpx.get(f"{_GOVERNANCE_URL}/classifications", timeout=5.0)
+        # Governance reads require a token; use this service's internal token.
+        resp = httpx.get(
+            f"{_GOVERNANCE_URL}/classifications", headers=service_headers(), timeout=5.0
+        )
         resp.raise_for_status()
         rows = resp.json()
     except Exception:  # noqa: BLE001 - fail open: no governance -> no masking

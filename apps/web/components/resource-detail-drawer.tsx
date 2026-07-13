@@ -65,10 +65,10 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
     if (!open || !resource) return
     setLoading(true)
     setFailed(false)
-    Promise.all([governanceApi.roles(), governanceApi.audit(50), governanceApi.lineage()])
+    Promise.all([governanceApi.roles(), governanceApi.audit({ pageSize: 50 }), governanceApi.lineage()])
       .then(([r, a, l]) => {
         setRoles(r)
-        setAudit(a)
+        setAudit(a.items)
         setLineage(l)
       })
       .catch(() => setFailed(true))
@@ -201,7 +201,7 @@ export function ResourceDrawerProvider({ children }: { children: React.ReactNode
                 <ol className="relative space-y-4 border-l border-border pl-4">
                   {auditRows.map((a, i) => (
                     <li key={i} className="relative">
-                      <span className="absolute -left-[21px] top-1 flex size-3 items-center justify-center rounded-full bg-emerald-500 ring-4 ring-background" />
+                      <span className="absolute -left-[21px] top-1 flex size-3 items-center justify-center rounded-full bg-blue-500 ring-4 ring-background" />
                       <div className="flex items-center gap-2 text-sm font-medium">
                         <FingerprintIcon className="size-3.5 text-muted-foreground" />
                         {a.action}
@@ -261,11 +261,11 @@ function FlowRow({ label, node }: { label: string; node?: boolean }) {
     <div
       className={cn(
         "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-        node ? "border-emerald-500/40 bg-emerald-500/10 font-medium" : "border-border bg-muted/30",
+        node ? "border-blue-500/40 bg-blue-500/10 font-medium" : "border-border bg-muted/30",
       )}
     >
       {node ? (
-        <GitCommitVerticalIcon className="size-4 shrink-0 text-emerald-500" />
+        <GitCommitVerticalIcon className="size-4 shrink-0 text-blue-500" />
       ) : (
         <Share2Icon className="size-3.5 shrink-0 text-muted-foreground" />
       )}

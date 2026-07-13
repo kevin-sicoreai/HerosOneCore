@@ -1,4 +1,4 @@
-"""AskDelphi ontology service — FastAPI application entry point."""
+"""HerosOneCore ontology service — FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
 
@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AskDelphi Ontology Service",
+    title="HerosOneCore Ontology Service",
     version="0.1.0",
     lifespan=lifespan,
     dependencies=[Depends(authorize)],

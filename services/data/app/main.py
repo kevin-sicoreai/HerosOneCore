@@ -1,4 +1,4 @@
-"""AskDelphi data service — FastAPI application entry point."""
+"""HerosOneCore data service — FastAPI application entry point."""
 
 import os
 from contextlib import asynccontextmanager
@@ -19,14 +19,18 @@ logger = get_logger("main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    os.makedirs(os.path.abspath(settings.data_plane_dir), exist_ok=True)
+    if settings.storage_backend == "local":
+        os.makedirs(os.path.abspath(settings.data_plane_dir), exist_ok=True)
     init_db()
-    logger.info("data service ready (db=%s)", settings.database_url)
+    logger.info(
+        "data service ready (db=%s, storage=%s)",
+        settings.database_url, settings.storage_backend,
+    )
     yield
 
 
 app = FastAPI(
-    title="AskDelphi Data Service",
+    title="HerosOneCore Data Service",
     version="0.1.0",
     lifespan=lifespan,
     dependencies=[Depends(authorize)],

@@ -20,12 +20,31 @@ export type Connector = {
   updated_at: string
 }
 
+// One configurable field a connector type needs, as described by the catalog.
+export type ConfigFieldDef = {
+  name: string
+  type: "string" | "integer" | "array" | string
+  required?: boolean
+  default?: unknown
+  secret?: boolean
+  description?: string
+}
+
 export type ConnectorType = {
   type: string
   display_name: string
   category: string
   supported: boolean
-  config_fields: Array<Record<string, unknown>>
+  config_fields: ConfigFieldDef[]
+}
+
+// Payload for creating a connector from the catalog (page-driven, not seeded).
+export type ConnectorCreate = {
+  name: string
+  source_type: string
+  config?: Record<string, unknown>
+  schedule?: string | null
+  owner_id?: string | null
 }
 
 export type Dataset = {
@@ -106,6 +125,8 @@ export const dataApi = {
       })}`
     ),
   connectorTypes: () => req<ConnectorType[]>("/connector-types"),
+  createConnector: (payload: ConnectorCreate) =>
+    req<Connector>("/connectors", { method: "POST", body: JSON.stringify(payload) }),
   datasets: (
     params: PageQuery & { connectorId?: string; layer?: string; q?: string } = {}
   ) =>

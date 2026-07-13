@@ -5,12 +5,17 @@ each service); `build` returns those rows merged with synthesized run/sync
 activity, newest first.
 """
 
+import math
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.clients import upstream
 from app.repositories.models import AuditEvent
 from app.schemas.governance import AuditEntry, AuditEventIn
+
+# Upper bound on the merged feed we hold in memory before filtering/paging.
+_FEED_CAP = 2000
 
 _SYNC_ACTION = {"success": "同步成功", "failed": "同步失败", "running": "同步中", "pending": "同步排队"}
 _RUN_ACTION = {"success": "管道运行成功", "failed": "管道运行失败", "running": "管道运行中", "pending": "管道排队"}
@@ -32,7 +37,7 @@ def record(db: Session, payload: AuditEventIn) -> None:
     db.commit()
 
 
-def build(db: Session, limit: int = 100) -> list[AuditEntry]:
+def build(db: Session, limit: int = _FEED_CAP) -> list[AuditEntry]:
     entries: list[AuditEntry] = _synthesized()
 
     # persisted write-log (real actors), newest first
@@ -48,6 +53,36 @@ def build(db: Session, limit: int = 100) -> list[AuditEntry]:
     # newest first; entries without a time sort last
     entries.sort(key=lambda e: e.time or "", reverse=True)
     return entries[:limit]
+
+
+def list_page(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    source: str | None = None,
+    q: str | None = None,
+) -> tuple[list[AuditEntry], int]:
+    """Filter the merged feed by source / free-text and return one page + total."""
+    entries = build(db)
+
+    if source:
+        entries = [e for e in entries if e.source == source]
+    if q:
+        ql = q.lower()
+        entries = [
+            e
+            for e in entries
+            if ql in e.actor.lower() or ql in e.action.lower() or ql in e.target.lower()
+        ]
+
+    total = len(entries)
+    start = (page - 1) * page_size
+    return entries[start : start + page_size], total
+
+
+def page_count(total: int, page_size: int) -> int:
+    return max(1, math.ceil(total / page_size)) if page_size else 1
 
 
 def _synthesized() -> list[AuditEntry]:

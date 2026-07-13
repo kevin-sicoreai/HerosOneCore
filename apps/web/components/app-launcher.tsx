@@ -40,7 +40,7 @@ export function AppLauncher() {
                       href={app.href}
                       className="flex flex-col items-center gap-1.5 rounded-lg border border-transparent p-2 text-center transition-colors hover:border-border hover:bg-muted"
                     >
-                      <span className="flex size-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+                      <span className="flex size-9 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
                         <Icon className="size-4.5" />
                       </span>
                       <span className="text-[11px] leading-tight">{app.title}</span>
