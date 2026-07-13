@@ -3,9 +3,11 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
+  ArrowLeftIcon,
   BarChart3Icon,
   BoxesIcon,
   CalendarClockIcon,
+  CheckIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
   FilterIcon,
@@ -51,6 +53,16 @@ const COLOR: Record<string, string> = {
   violet: "border-violet-500/60 text-violet-500",
   amber: "border-amber-500/60 text-amber-500",
   rose: "border-rose-500/60 text-rose-500",
+}
+
+// Ontology node color -> tinted icon-chip classes (bg + text), for the landing
+// object-type cards. Literal class strings so Tailwind's JIT keeps them.
+const TYPE_CHIP: Record<string, string> = {
+  emerald: "bg-emerald-500/10 text-emerald-500",
+  sky: "bg-sky-500/10 text-sky-500",
+  violet: "bg-violet-500/10 text-violet-500",
+  amber: "bg-amber-500/10 text-amber-500",
+  rose: "bg-rose-500/10 text-rose-500",
 }
 
 // Max neighbours listed inline per relation before a "view all" button appears.
@@ -110,12 +122,12 @@ export default function ExplorerPage() {
 
   React.useEffect(() => {
     // Graph (node metadata + edge list) and link types (join columns) load
-    // together; link types drive the set-level "search around" pivots.
+    // together; link types drive the set-level "search around" pivots. No type
+    // is auto-selected — the page lands on the object-type card wall.
     Promise.all([ontologyApi.graph(), ontologyApi.linkTypes().catch(() => [])])
       .then(([g, lts]) => {
         setGraph(g)
         setLinkTypes(lts)
-        if (g.nodes[0]) setSelectedTypeId(g.nodes[0].id)
       })
       .finally(() => setLoading(false))
   }, [])
@@ -125,6 +137,14 @@ export default function ExplorerPage() {
 
   function selectType(id: string) {
     setSelectedTypeId(id)
+    setTrail([])
+    setDerived(null)
+  }
+
+  // Return to the object-type card wall (landing state). Refresh always lands
+  // here too — no last-selection memory.
+  function backToTypes() {
+    setSelectedTypeId(null)
     setTrail([])
     setDerived(null)
   }
@@ -139,82 +159,132 @@ export default function ExplorerPage() {
   const pushFocus = (f: FocusObj) => setTrail((t) => [...t, f])
   const truncateTo = (i: number) => setTrail((t) => t.slice(0, i + 1))
 
+  // Landing state: the object-type card wall. No type is selected, so the page
+  // reads as a consumer search entry — pick a type to start exploring.
+  if (!selectedNode) {
+    return (
+      <PageContainer className="h-full">
+        <PageHeading
+          title="对象浏览器"
+          desc="选择一个对象类型开始探索，点开查看属性、关系与治理"
+          icon={<BoxesIcon />}
+        />
+        <TypeGrid nodes={graph.nodes} links={graph.links} loading={loading} onSelect={selectType} />
+      </PageContainer>
+    )
+  }
+
+  // Explore / drill state: one type is selected. The card fills the viewport and
+  // hosts either the faceted instance browser or a single object's Object View.
   return (
     <PageContainer className="h-full">
-      <PageHeading
-        title="对象浏览器"
-        desc="浏览对象实例，点开查看属性、关系与治理"
-        icon={<BoxesIcon />}
-      />
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
-        {/* Object-type rail */}
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-3">
-            <div className="mb-2 text-xs font-medium text-muted-foreground">对象类型</div>
-            <div className="space-y-0.5">
-              {graph.nodes.map((t: GraphNode) => (
-                <button
-                  key={t.id}
-                  onClick={() => selectType(t.id)}
-                  className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
-                    selectedTypeId === t.id
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                      : "hover:bg-muted"
-                  }`}
-                >
-                  <span className="truncate">{t.display_name}</span>
-                  <span className="text-xs text-muted-foreground">{t.instance_count ?? "—"}</span>
-                </button>
-              ))}
-              {!loading && graph.nodes.length === 0 && (
-                <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                  暂无对象类型，请先在本体管理器中创建
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Main area: list mode (no focus) or Object View (focused) */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
-          {!selectedNode ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {loading ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2Icon className="size-4 animate-spin" /> 加载本体…
-                </span>
-              ) : (
-                "请选择一个对象类型"
-              )}
-            </div>
-          ) : cur ? (
-            <ObjectView
-              cur={cur}
-              typeName={selectedNode.display_name}
-              trail={trail}
-              graph={graph}
-              typeMap={typeMap}
-              pkColOf={pkColOf}
-              onHome={() => setTrail([])}
-              onTruncate={truncateTo}
-              onPush={pushFocus}
-              onOpen={open}
-            />
-          ) : (
-            <InstanceList
-              focus={selectedNode}
-              onPick={pushFocus}
-              links={linkTypes}
-              nodeMap={typeMap}
-              derived={derived && derived.targetTypeId === selectedNode.id ? derived : null}
-              onPivot={pivotTo}
-              onClearDerived={() => setDerived(null)}
-            />
-          )}
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
+        {cur ? (
+          <ObjectView
+            cur={cur}
+            typeName={selectedNode.display_name}
+            trail={trail}
+            graph={graph}
+            typeMap={typeMap}
+            pkColOf={pkColOf}
+            onHome={() => setTrail([])}
+            onTruncate={truncateTo}
+            onPush={pushFocus}
+            onOpen={open}
+          />
+        ) : (
+          <InstanceList
+            focus={selectedNode}
+            onPick={pushFocus}
+            onBack={backToTypes}
+            links={linkTypes}
+            nodeMap={typeMap}
+            derived={derived && derived.targetTypeId === selectedNode.id ? derived : null}
+            onPivot={pivotTo}
+            onClearDerived={() => setDerived(null)}
+          />
+        )}
       </div>
     </PageContainer>
+  )
+}
+
+// Landing state: the object-type card wall. Each card is a search-entry tile —
+// Chinese display name, instance count, and how many relations the type takes
+// part in. Clicking a card enters the explore state for that type.
+function TypeGrid({
+  nodes,
+  links,
+  loading,
+  onSelect,
+}: {
+  nodes: GraphNode[]
+  links: OntologyGraph["links"]
+  loading: boolean
+  onSelect: (id: string) => void
+}) {
+  // Relations a type participates in: edges touching it from either side.
+  const relCountOf = React.useCallback(
+    (id: string) =>
+      links.filter((l) => l.from_object_type_id === id || l.to_object_type_id === id).length,
+    [links]
+  )
+
+  if (loading && nodes.length === 0) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+        <span className="inline-flex items-center gap-2">
+          <Loader2Icon className="size-4 animate-spin" /> 加载本体…
+        </span>
+      </div>
+    )
+  }
+
+  if (nodes.length === 0) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">
+        暂无对象类型，请先在本体管理器中创建
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {nodes.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => onSelect(t.id)}
+            className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-emerald-500/50 hover:bg-muted/30"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span
+                className={`flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4.5 ${
+                  TYPE_CHIP[t.color] ?? TYPE_CHIP.emerald
+                }`}
+              >
+                <BoxesIcon />
+              </span>
+              <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-emerald-500" />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate font-heading text-base font-semibold tracking-tight">
+                {t.display_name}
+              </div>
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {t.instance_count?.toLocaleString() ?? "—"}
+                </span>
+                个实例
+                <span className="text-muted-foreground/40">·</span>
+                <span className="font-medium text-foreground">{relCountOf(t.id)}</span>
+                个关系
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -261,6 +331,7 @@ const LENS_NUMERIC = /^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|FLOAT|DOUBLE|DEC
 function InstanceList({
   focus,
   onPick,
+  onBack,
   links,
   nodeMap,
   derived,
@@ -269,6 +340,7 @@ function InstanceList({
 }: {
   focus: GraphNode
   onPick: (f: FocusObj) => void
+  onBack: () => void
   links: LinkType[]
   nodeMap: Map<string, GraphNode>
   derived: DerivedSet | null
@@ -670,299 +742,370 @@ function InstanceList({
   }
 
   return (
-    <>
-      {/* View switcher — 列表 / 时间轴 / 地图 (analysis-page lens-bar styling). */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
-          {(
-            [
-              { key: "list", label: "列表", Icon: TableIcon, enabled: true, hint: "" },
-              {
-                key: "distribution",
-                label: "分布",
-                Icon: BarChart3Icon,
-                enabled: distAttrs.length > 0,
-                hint: "当前对象类型无可用维度",
-              },
-              {
-                key: "timeline",
-                label: "时间轴",
-                Icon: CalendarClockIcon,
-                enabled: !!timeCol,
-                hint: "当前对象类型无时间属性",
-              },
-              {
-                key: "map",
-                label: "地图",
-                Icon: MapIcon,
-                enabled: !!geoCol,
-                hint: "当前对象类型无地理属性",
-              },
-            ] as const
-          ).map((t) => (
-            <button
-              key={t.key}
-              onClick={() => t.enabled && setView(t.key)}
-              disabled={!t.enabled}
-              title={!t.enabled ? t.hint : undefined}
-              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                !t.enabled ? "cursor-not-allowed opacity-50" : ""
-              } ${
-                view === t.key
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <t.Icon className="size-4" /> {t.label}
-            </button>
-          ))}
+    <div className="flex h-full flex-col">
+      {/* ① Header bar: back to the type wall + type name + total badge + the big
+          client-side search box (the visual lead of this consumer-search area). */}
+      <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+        <button
+          onClick={onBack}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-emerald-500/40 hover:text-foreground"
+        >
+          <ArrowLeftIcon className="size-4" /> 对象类型
+        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="font-heading text-base font-semibold tracking-tight">
+            {focus.display_name}
+          </span>
+          <Badge variant="outline">
+            {derived
+              ? `${derivedMatched.toLocaleString()} 条`
+              : `${focus.instance_count?.toLocaleString() ?? "—"} 实例`}
+          </Badge>
+        </div>
+        <div className="relative min-w-0 flex-1">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={`在${focus.display_name}中搜索…`}
+            className="h-11 w-full rounded-xl border border-input bg-transparent pr-3 pl-11 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+          />
         </div>
       </div>
 
-      {/* Derived-set chain chip: the "search around" trail that produced this set. */}
-      {derived && (
-        <div className="flex items-center gap-2 border-b border-border bg-emerald-500/5 px-3 py-2">
-          <RouteIcon className="size-4 shrink-0 text-emerald-500" />
-          <span className="min-w-0 flex-1 truncate text-xs text-emerald-700 dark:text-emerald-300">
-            {derived.chainText}
-            <span className="ml-1 font-medium">· {derivedMatched.toLocaleString()} 条</span>
-          </span>
-          <button
-            onClick={onClearDerived}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-500/40 px-1.5 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
-          >
-            清除 <XIcon className="size-3" />
-          </button>
-        </div>
-      )}
-
-      {/* Toolbar: search (list only) + search-around + facet chips + count. */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-        {view === "list" && (
-          <div className="relative w-full max-w-xs">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索…"
-              className="h-8 w-full rounded-lg border border-input bg-transparent pr-2 pl-8 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-            />
-          </div>
-        )}
-
-        {/* Search Around: pivot the whole current set to a related type. */}
-        {directions.length > 0 && (
-          <div className="relative">
-            <button
-              onClick={() => setPivotMenuOpen((o) => !o)}
-              disabled={pivotBusy}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
-            >
-              {pivotBusy ? (
-                <Loader2Icon className="size-4 animate-spin" />
-              ) : (
-                <Share2Icon className="size-4" />
-              )}
-              沿关系跳转
-            </button>
-            {pivotMenuOpen && (
-              <>
-                {/* Click-away backdrop. */}
-                <button
-                  className="fixed inset-0 z-10 cursor-default"
-                  aria-hidden
-                  onClick={() => setPivotMenuOpen(false)}
-                />
-                <div className="absolute left-0 z-20 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
-                  <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
-                    将当前对象集沿关系跳转到
-                  </div>
-                  <div className="max-h-64 overflow-auto py-1">
-                    {directions.map((d) => {
-                      const target = nodeMap.get(d.targetTypeId)
-                      return (
-                        <button
-                          key={`${d.link.id}:${d.reverse}`}
-                          onClick={() => runPivot(d)}
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
-                        >
-                          <ChevronRightIcon className="size-3.5 shrink-0 text-emerald-500" />
-                          <span className="min-w-0 truncate">
-                            沿『{d.link.display_name}』→ {target?.display_name ?? d.targetTypeId}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </>
+      {/* ② Body: left facet panel (the page's signature) + right result area. */}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* Faceted filter panel. */}
+        <aside className="order-1 flex max-h-72 shrink-0 flex-col overflow-hidden border-b border-border lg:order-none lg:max-h-none lg:w-60 lg:border-b-0 lg:border-r">
+          <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
+            <FilterIcon className="size-3.5" /> 筛选
+            {activeFacets.length > 0 && (
+              <button
+                onClick={() => {
+                  // Same effect as removing each chip: reset selections and drop
+                  // any stale pivot notice.
+                  setPivotError(null)
+                  setSelected({})
+                }}
+                className="ml-auto rounded-md px-1.5 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
+              >
+                清除全部
+              </button>
             )}
           </div>
-        )}
-
-        {/* Open the current object set in the analysis workbench (a handoff). */}
-        <button
-          onClick={openInWorkbench}
-          disabled={handoffBusy}
-          title="把当前对象集带到分析工作台，作为分析的起点"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
-        >
-          {handoffBusy ? (
-            <Loader2Icon className="size-4 animate-spin" />
-          ) : (
-            <RadarIcon className="size-4" />
-          )}
-          在分析工作台打开
-        </button>
-
-        {/* Active facet filters as removable chips (shown across all views). */}
-        {activeFacets.flatMap(([col, set]) =>
-          [...set].map((value) => (
-            <button
-              key={`${col}:${value}`}
-              onClick={() => toggleFacet(col, value)}
-              className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
-            >
-              <span className="text-muted-foreground">{fieldLabel(col)}:</span>
-              {value}
-              <XIcon className="size-3" />
-            </button>
-          ))
-        )}
-        {pivotError && (
-          <span className="text-xs text-amber-600 dark:text-amber-400">{pivotError}</span>
-        )}
-        <span className="ml-auto text-xs text-muted-foreground">
-          {view === "list"
-            ? derived
-              ? `${filtered.length} 行样本 · 共 ${derivedMatched.toLocaleString()} 条`
-              : `${filtered.length} 个对象`
-            : `共 ${lensMatched.toLocaleString()} 条（全量）`}
-        </span>
-      </div>
-
-      {view === "list" ? (
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {/* Table */}
-        <div className="order-2 flex min-h-0 flex-1 flex-col lg:order-1">
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-              <Loader2Icon className="size-4 animate-spin" /> 加载实例…
-            </div>
-          ) : error ? (
-            <div className="py-10 text-center text-sm text-red-500">{error}</div>
-          ) : (
-            <>
-              <div className="min-h-0 flex-1 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
-                    <tr className="border-b border-border">
-                      {columns.map((c) => (
-                        <th key={c} className="px-3 py-2 text-left font-medium">
-                          {fieldLabel(c)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paged.map((r, i) => (
-                      <tr
-                        key={i}
-                        onClick={() =>
-                          onPick({
-                            otId: focus.id,
-                            pk: String(r[pkCol]),
-                            label: labelOf(r),
-                            typeName: focus.display_name,
-                            color: focus.color,
-                            row: r,
-                          })
-                        }
-                        className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
-                      >
-                        {columns.map((c, j) => (
-                          <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
-                            {String(r[c] ?? "")}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {filtered.length === 0 && (
-                  <div className="p-6 text-center text-sm text-muted-foreground">无匹配对象</div>
+          <div className="min-h-0 flex-1 space-y-4 overflow-auto p-3">
+            {/* Selected values summarised as removable chips. */}
+            {activeFacets.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {activeFacets.flatMap(([col, set]) =>
+                  [...set].map((value) => (
+                    <button
+                      key={`${col}:${value}`}
+                      onClick={() => toggleFacet(col, value)}
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+                    >
+                      <span className="text-muted-foreground">{fieldLabel(col)}:</span>
+                      {value}
+                      <XIcon className="size-3" />
+                    </button>
+                  ))
                 )}
               </div>
-              {filtered.length > 0 && (
-                <Pagination
-                  page={page}
-                  pageSize={INSTANCE_PAGE_SIZE}
-                  total={filtered.length}
-                  pages={pageCount}
-                  onPageChange={setPage}
-                  className="shrink-0 border-t border-border"
-                />
-              )}
-            </>
-          )}
-        </div>
-        {/* Facet panel */}
-        {!loading && !error && facets.length > 0 && (
-          <div className="order-1 max-h-64 shrink-0 space-y-4 overflow-auto border-b border-border p-3 lg:order-2 lg:max-h-none lg:w-[220px] lg:border-b-0 lg:border-l">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <FilterIcon className="size-3.5" /> 筛选
-            </div>
-            {facets.map((f) => {
-              const sel = selected[f.col]
-              const expanded = expandedFacets[f.col]
-              const shown = expanded ? f.values : f.values.slice(0, FACET_VALUES_SHOWN)
-              const hidden = f.values.length - shown.length
-              return (
-                <div key={f.col}>
-                  <div className="mb-1 text-xs font-medium text-foreground">{fieldLabel(f.col)}</div>
-                  <div className="space-y-0.5">
-                    {shown.map((v) => {
-                      const on = sel?.has(v.value) ?? false
-                      return (
-                        <button
-                          key={v.value}
-                          onClick={() => toggleFacet(f.col, v.value)}
-                          className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-xs transition-colors ${
-                            on
-                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                              : "hover:bg-muted"
-                          }`}
-                        >
-                          <span className="truncate text-left">{v.value}</span>
-                          <span className={on ? "shrink-0" : "shrink-0 text-muted-foreground"}>{v.count}</span>
-                        </button>
-                      )
-                    })}
+            )}
+            {loading ? (
+              <div className="flex items-center gap-2 px-1 py-2 text-xs text-muted-foreground">
+                <Loader2Icon className="size-3.5 animate-spin" /> 加载筛选项…
+              </div>
+            ) : facets.length === 0 ? (
+              <div className="px-1 py-2 text-xs text-muted-foreground">当前对象类型无可筛选维度</div>
+            ) : (
+              facets.map((f) => {
+                const sel = selected[f.col]
+                const expanded = expandedFacets[f.col]
+                const shown = expanded ? f.values : f.values.slice(0, FACET_VALUES_SHOWN)
+                const hidden = f.values.length - shown.length
+                // Bar scaling: the top value fills the row; the rest scale to it.
+                const max = f.values[0]?.count ?? 1
+                return (
+                  <div key={f.col}>
+                    <div className="mb-1 text-xs font-medium text-foreground">{fieldLabel(f.col)}</div>
+                    <div className="space-y-0.5">
+                      {shown.map((v) => {
+                        const on = sel?.has(v.value) ?? false
+                        const pct = Math.max(4, Math.round((v.count / max) * 100))
+                        return (
+                          <button
+                            key={v.value}
+                            onClick={() => toggleFacet(f.col, v.value)}
+                            className={`relative flex w-full items-center justify-between gap-2 overflow-hidden rounded-md px-2 py-1.5 text-xs transition-colors ${
+                              on
+                                ? "text-emerald-600 ring-1 ring-inset ring-emerald-500/50 dark:text-emerald-400"
+                                : "hover:bg-muted"
+                            }`}
+                          >
+                            {/* Count bar sized by this value's share of the facet max. */}
+                            <span
+                              aria-hidden
+                              className={`absolute inset-y-0 left-0 ${
+                                on ? "bg-emerald-500/20" : "bg-emerald-500/10"
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                            <span className="relative z-10 flex min-w-0 items-center gap-1 text-left">
+                              {on && <CheckIcon className="size-3 shrink-0" />}
+                              <span className="truncate">{v.value}</span>
+                            </span>
+                            <span
+                              className={`relative z-10 shrink-0 tabular-nums ${
+                                on ? "" : "text-muted-foreground"
+                              }`}
+                            >
+                              {v.count}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {(hidden > 0 || expanded) && f.values.length > FACET_VALUES_SHOWN && (
+                      <button
+                        onClick={() =>
+                          setExpandedFacets((prev) => ({ ...prev, [f.col]: !prev[f.col] }))
+                        }
+                        className="mt-0.5 px-2 text-xs text-emerald-600 transition-colors hover:underline dark:text-emerald-400"
+                      >
+                        {expanded ? "收起" : `还有 ${hidden} 项`}
+                      </button>
+                    )}
                   </div>
-                  {(hidden > 0 || expanded) && f.values.length > FACET_VALUES_SHOWN && (
-                    <button
-                      onClick={() =>
-                        setExpandedFacets((prev) => ({ ...prev, [f.col]: !prev[f.col] }))
-                      }
-                      className="mt-0.5 px-2 text-xs text-emerald-600 transition-colors hover:underline dark:text-emerald-400"
-                    >
-                      {expanded ? "收起" : `还有 ${hidden} 项`}
-                    </button>
+                )
+              })
+            )}
+          </div>
+          <div className="shrink-0 border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
+            基于已加载的前 {rows.length} 行
+          </div>
+        </aside>
+
+        {/* Result area: object-set action bar + the active view. */}
+        <div className="order-2 flex min-h-0 flex-1 flex-col lg:order-none">
+          {/* Object-set action bar: match count + derived chain chip (left);
+              view switcher + set-level actions (right). */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+            <span className="text-sm font-medium">
+              {view === "list"
+                ? derived
+                  ? `${filtered.length} 行样本 · 共 ${derivedMatched.toLocaleString()} 条`
+                  : `${filtered.length} 个对象`
+                : `共 ${lensMatched.toLocaleString()} 条（全量）`}
+            </span>
+
+            {/* Derived-set chain chip: the "search around" trail that produced this set. */}
+            {derived && (
+              <span className="inline-flex min-w-0 max-w-md items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-300">
+                <RouteIcon className="size-3.5 shrink-0 text-emerald-500" />
+                <span className="truncate">
+                  {derived.chainText}
+                  <span className="ml-1 font-medium">· {derivedMatched.toLocaleString()} 条</span>
+                </span>
+                <button
+                  onClick={onClearDerived}
+                  className="shrink-0 rounded-sm p-0.5 text-emerald-600 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+                  title="清除跳转链路"
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </span>
+            )}
+
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {/* View switcher — 列表 / 分布 / 时间轴 / 地图. */}
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+                {(
+                  [
+                    { key: "list", label: "列表", Icon: TableIcon, enabled: true, hint: "" },
+                    {
+                      key: "distribution",
+                      label: "分布",
+                      Icon: BarChart3Icon,
+                      enabled: distAttrs.length > 0,
+                      hint: "当前对象类型无可用维度",
+                    },
+                    {
+                      key: "timeline",
+                      label: "时间轴",
+                      Icon: CalendarClockIcon,
+                      enabled: !!timeCol,
+                      hint: "当前对象类型无时间属性",
+                    },
+                    {
+                      key: "map",
+                      label: "地图",
+                      Icon: MapIcon,
+                      enabled: !!geoCol,
+                      hint: "当前对象类型无地理属性",
+                    },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => t.enabled && setView(t.key)}
+                    disabled={!t.enabled}
+                    title={!t.enabled ? t.hint : undefined}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                      !t.enabled ? "cursor-not-allowed opacity-50" : ""
+                    } ${
+                      view === t.key
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <t.Icon className="size-4" /> {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search Around: pivot the whole current set to a related type. */}
+              {directions.length > 0 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setPivotMenuOpen((o) => !o)}
+                    disabled={pivotBusy}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+                  >
+                    {pivotBusy ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <Share2Icon className="size-4" />
+                    )}
+                    沿关系跳转
+                  </button>
+                  {pivotMenuOpen && (
+                    <>
+                      {/* Click-away backdrop. */}
+                      <button
+                        className="fixed inset-0 z-10 cursor-default"
+                        aria-hidden
+                        onClick={() => setPivotMenuOpen(false)}
+                      />
+                      <div className="absolute right-0 z-20 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+                        <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+                          将当前对象集沿关系跳转到
+                        </div>
+                        <div className="max-h-64 overflow-auto py-1">
+                          {directions.map((d) => {
+                            const target = nodeMap.get(d.targetTypeId)
+                            return (
+                              <button
+                                key={`${d.link.id}:${d.reverse}`}
+                                onClick={() => runPivot(d)}
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
+                              >
+                                <ChevronRightIcon className="size-3.5 shrink-0 text-emerald-500" />
+                                <span className="min-w-0 truncate">
+                                  沿『{d.link.display_name}』→ {target?.display_name ?? d.targetTypeId}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
-              )
-            })}
-            <div className="border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
-              基于已加载的前 {rows.length} 行
+              )}
+
+              {/* Open the current object set in the analysis workbench (a handoff). */}
+              <button
+                onClick={openInWorkbench}
+                disabled={handoffBusy}
+                title="把当前对象集带到分析工作台，作为分析的起点"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+              >
+                {handoffBusy ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : (
+                  <RadarIcon className="size-4" />
+                )}
+                在分析工作台打开
+              </button>
             </div>
           </div>
-        )}
-      </div>
-      ) : (
-        // Lens body: timeline / map, fed by the analysis service over the full
-        // object set (filtered by the mapped facet selections).
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {view === "distribution" ? (
+
+          {/* Over-limit / handoff notices for the set-level actions. */}
+          {pivotError && (
+            <div className="border-b border-border px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+              {pivotError}
+            </div>
+          )}
+
+          {view === "list" ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                  <Loader2Icon className="size-4 animate-spin" /> 加载实例…
+                </div>
+              ) : error ? (
+                <div className="py-10 text-center text-sm text-red-500">{error}</div>
+              ) : (
+                <>
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
+                        <tr className="border-b border-border">
+                          {columns.map((c) => (
+                            <th key={c} className="px-3 py-2 text-left font-medium">
+                              {fieldLabel(c)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paged.map((r, i) => (
+                          <tr
+                            key={i}
+                            onClick={() =>
+                              onPick({
+                                otId: focus.id,
+                                pk: String(r[pkCol]),
+                                label: labelOf(r),
+                                typeName: focus.display_name,
+                                color: focus.color,
+                                row: r,
+                              })
+                            }
+                            className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
+                          >
+                            {columns.map((c, j) => (
+                              <td key={c} className={j === 0 ? "px-3 py-2 font-mono text-emerald-500" : "px-3 py-2"}>
+                                {String(r[c] ?? "")}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {filtered.length === 0 && (
+                      <div className="p-6 text-center text-sm text-muted-foreground">无匹配对象</div>
+                    )}
+                  </div>
+                  {filtered.length > 0 && (
+                    <Pagination
+                      page={page}
+                      pageSize={INSTANCE_PAGE_SIZE}
+                      total={filtered.length}
+                      pages={pageCount}
+                      onPageChange={setPage}
+                      className="shrink-0 border-t border-border"
+                    />
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            // Lens body: distribution / timeline / map, fed by the analysis service
+            // over the full object set (filtered by the mapped facet selections).
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {view === "distribution" ? (
             <div className="flex h-full flex-col">
               {/* Dimension picker + total. */}
               <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
@@ -1013,9 +1156,11 @@ function InstanceList({
           ) : view === "map" && geoCol ? (
             <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} />
           ) : null}
+            </div>
+          )}
         </div>
-      )}
-    </>
+      </div>
+    </div>
   )
 }
 

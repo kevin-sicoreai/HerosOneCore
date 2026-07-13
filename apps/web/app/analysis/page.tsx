@@ -60,12 +60,17 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Pagination } from "@/components/ui/pagination"
 
-// A lens is one way of looking at the current object set. The relationship
-// (schema) graph lives in the ontology manager, not here.
-type Lens = "dashboard" | "table" | "chart" | "timeline" | "map"
+// A lens is one way of looking at the *current* object set. The dashboard is no
+// longer a lens — it is a top-level page mode (see PageMode) — so the set-scoped
+// lenses are table / chart / timeline / map. The relationship (schema) graph
+// lives in the ontology manager, not here.
+type Lens = "table" | "chart" | "timeline" | "map"
+
+// The two top-level modes of this page. "dashboard" is the global HR metric board
+// (no object set, no config); "analysis" is the saveable step-board document.
+type PageMode = "dashboard" | "analysis"
 
 const LENSES: { key: Lens; label: string; icon: React.ElementType }[] = [
-  { key: "dashboard", label: "看板", icon: LayoutDashboardIcon },
   { key: "table", label: "表格", icon: TableIcon },
   { key: "chart", label: "图表", icon: BarChart3Icon },
   { key: "timeline", label: "时间轴", icon: CalendarClockIcon },
@@ -95,9 +100,6 @@ const OP_OPTIONS: { value: FilterOp; label: string }[] = [
 
 const SELECT_BASE =
   "rounded-md border border-border bg-transparent px-2 py-1.5 text-sm outline-none focus:border-emerald-500/60"
-// Full-width variant for single-column selects. Fixed/flex selects use
-// SELECT_BASE directly to avoid a w-full vs w-* class conflict.
-const SELECT_CLASS = `w-full ${SELECT_BASE}`
 
 // Numeric source SQL types (mirrors the analysis service's _NUMERIC_TYPES).
 // Used to right-align numeric detail columns even when the column is a
@@ -161,13 +163,17 @@ function stepDerivedFilters(step: PathStep): FilterSpec[] {
   return step.kind === "source" ? step.filters : [step.inFilter]
 }
 
-// Human label for the current lens, shown as the trailing breadcrumb segment.
-const LENS_STEP_LABEL: Record<Lens, string> = {
-  dashboard: "看板",
-  table: "表格",
-  chart: "图表",
-  timeline: "时间轴",
-  map: "地图",
+// Compact one-line summary of a filter list (e.g. "状态=离职，城市包含北京"), used
+// as a pivot board's "基于：…" subtitle. Arrays only ever arrive on the hidden
+// pivot-derived `in` filter, which is never summarized here.
+function summarizeFilters(fs: FilterSpec[]): string {
+  return fs
+    .map((f) => {
+      const op = OP_OPTIONS.find((o) => o.value === f.op)?.label ?? f.op
+      const val = Array.isArray(f.value) ? f.value.join("/") : f.value
+      return `${fieldLabel(f.field)}${op}${val}`
+    })
+    .join("，")
 }
 
 export default function AnalysisPage() {
@@ -204,6 +210,8 @@ export default function AnalysisPage() {
   // Map: server-side count-per-geo aggregate, {value,count} per location.
   const [geoCounts, setGeoCounts] = React.useState<{ value: string; count: number }[]>([])
   const [lens, setLens] = React.useState<Lens>("table")
+  // Top-level page mode: the global board (default) or the analysis document.
+  const [mode, setMode] = React.useState<PageMode>("dashboard")
   // Chart (cube-metric) lens state.
   const [chartMetricKey, setChartMetricKey] = React.useState<string>("")
   const [chartDimKey, setChartDimKey] = React.useState<string>("")
@@ -283,21 +291,16 @@ export default function AnalysisPage() {
 
   const lensAvailable = React.useCallback(
     (l: Lens) =>
-      // The dashboard is a global overview driven by the metric catalog, so its
-      // availability tracks metric definitions only — never the object type.
-      // This keeps the fall-back effect below from evicting it on type switches.
-      l === "dashboard"
-        ? allMetrics.length > 0
-        : l === "timeline"
-          ? !!timeCol
-          : l === "map"
-            ? !!geoCol
-            : l === "chart"
-              ? // Chart is available when the type has cube metrics, or when a
-                // pivot is active (it then renders via an /analyze aggregate).
-                chartMetrics.length > 0 || pivotActive
-              : true,
-    [allMetrics, timeCol, geoCol, chartMetrics, pivotActive]
+      l === "timeline"
+        ? !!timeCol
+        : l === "map"
+          ? !!geoCol
+          : l === "chart"
+            ? // Chart is available when the type has cube metrics, or when a
+              // pivot is active (it then renders via an /analyze aggregate).
+              chartMetrics.length > 0 || pivotActive
+            : true,
+    [timeCol, geoCol, chartMetrics, pivotActive]
   )
 
   // Load the catalog + metric definitions. If the object browser handed off an
@@ -372,9 +375,12 @@ export default function AnalysisPage() {
 
   // Open a handoff from the object browser as the path's "source" step: switch
   // to its table, attach its filters as the (hidden) derived filters, and start
-  // the user filters empty. This is a fresh, unsaved analysis.
+  // the user filters empty. This is a fresh, unsaved analysis. Landing on a
+  // handoff jumps straight to the analysis document (mirrors openAnalysis) so
+  // the handed-off set is visible without a manual mode switch.
   function applyHandoff(payload: AnalysisHandoff, ts: AnalysisTable[]) {
     const label = ts.find((t) => t.name === payload.table)?.label ?? payload.table
+    setMode("analysis")
     setTableName(payload.table)
     setPathSteps([
       {
@@ -558,12 +564,12 @@ export default function AnalysisPage() {
     setDashData(null)
   }, [allMetrics])
 
-  // Build the board on entering the dashboard lens with no cached data. The
+  // Build the board on entering the dashboard *mode* with no cached data. The
   // refresh button forces a rebuild by calling loadDashboard directly.
   React.useEffect(() => {
-    if (lens !== "dashboard" || dashData !== null) return
+    if (mode !== "dashboard" || dashData !== null) return
     loadDashboard()
-  }, [lens, dashData, loadDashboard])
+  }, [mode, dashData, loadDashboard])
 
   // Reset user config when the query table changes via a pivot / backtrack (the
   // path itself is managed by the caller). Mirrors selectTable minus the path reset.
@@ -666,15 +672,10 @@ export default function AnalysisPage() {
 
   // --- Saved analyses: build / save / open (replay). ---
 
-  // The path's base table + label + count (for the "起始" breadcrumb and the
-  // saved recipe). The source step's table when the path is a handoff, else the
+  // The path's base table + full row count (for the 数据 board and the saved
+  // recipe). The source step's table when the path is a handoff, else the
   // captured pivot origin, else the plain active table.
   const startTable = sourceStep ? sourceStep.targetTable : origin?.table ?? tableName
-  const startLabel = sourceStep
-    ? tables.find((t) => t.name === sourceStep.targetTable)?.label ?? sourceStep.targetTable
-    : pivotActive
-      ? origin?.label ?? ""
-      : table?.label ?? tableName
   const startCount = sourceStep
     ? tables.find((t) => t.name === sourceStep.targetTable)?.row_count ?? 0
     : pivotActive
@@ -718,6 +719,10 @@ export default function AnalysisPage() {
   async function applyDefinition(d: SavedAnalysisDetail) {
     const def = d.definition
     setReplayError(null)
+    // Replay rebuilds the whole path, so any stale pivot notice (e.g. a previous
+    // over-limit "对象集过大") no longer applies — clear it like the other
+    // path-changing entry points (selectTable / goToOrigin / goToStep) do.
+    setPivotError(null)
     let activeTable = def.table
     let derived: FilterSpec[] = []
     const rebuilt: PathStep[] = []
@@ -807,7 +812,10 @@ export default function AnalysisPage() {
     // Restore user filters only if the whole path replayed — a partial replay
     // may leave us on an intermediate table whose columns differ.
     setFilters(stopped ? [] : def.filters ?? [])
-    setLens((def.lens as Lens) || "table")
+    // Legacy saved analyses may carry lens "dashboard" (the board used to be a
+    // lens). The board is a page mode now, so old value falls back to the table
+    // lens and replays without error.
+    setLens(def.lens === "dashboard" || !def.lens ? "table" : (def.lens as Lens))
     setPage(1)
     setResult(null)
     setOrderBy(null)
@@ -822,6 +830,8 @@ export default function AnalysisPage() {
     try {
       const d = await analysisApi.getAnalysis(id)
       await applyDefinition(d)
+      // Opening a saved analysis lands on its step-board document.
+      setMode("analysis")
       setCurrentAnalysisId(d.id)
       setCurrentAnalysisName(d.name)
     } catch {
@@ -894,14 +904,6 @@ export default function AnalysisPage() {
     setFilters((f) => [...f, { field: col.name, op: "eq", value: "" }])
   }
 
-  // Breadcrumb helpers: a short summary of the current user filters.
-  const opSymbol = (op: FilterOp) => OP_OPTIONS.find((o) => o.value === op)?.label ?? op
-  const filterSummary = cleanUserFilters
-    .map((f) => `${fieldLabel(f.field)}${opSymbol(f.op)}${Array.isArray(f.value) ? f.value.join("/") : f.value}`)
-    .join("，")
-  // Show the analysis-path breadcrumb on every set-scoped lens (not the global board).
-  const showPath = !!table && lens !== "dashboard"
-
   return (
     <PageContainer className="h-full">
       <PageHeading
@@ -910,121 +912,29 @@ export default function AnalysisPage() {
         icon={<RadarIcon />}
         actions={
           <div className="flex items-center gap-2">
-            {currentAnalysisName && (
-              <span
-                className="hidden max-w-[180px] truncate text-sm font-medium text-foreground md:inline"
-                title={currentAnalysisName}
-              >
-                {currentAnalysisName}
-              </span>
-            )}
-
-            {/* "我的分析" — open a saved analysis (two-click delete per item). */}
-            <div className="relative">
+            {/* Top-level mode switch: 看板 (global board) vs 分析 (step-board document).
+                The save / open controls live inside the analysis document head. */}
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
               <button
-                onClick={() => setSavedMenuOpen((o) => !o)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground"
-              >
-                <FolderOpenIcon className="size-4" /> 我的分析
-                <ChevronDownIcon className="size-3.5" />
-              </button>
-              {savedMenuOpen && (
-                <>
-                  <button
-                    className="fixed inset-0 z-10 cursor-default"
-                    aria-hidden
-                    onClick={() => setSavedMenuOpen(false)}
-                  />
-                  <div className="absolute right-0 z-20 mt-1 w-80 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
-                    <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
-                      已保存的分析
-                    </div>
-                    {savedList.length === 0 ? (
-                      <div className="px-3 py-5 text-center text-sm text-muted-foreground">
-                        {offline ? "分析服务未启动" : "暂无保存的分析"}
-                      </div>
-                    ) : (
-                      <div className="max-h-72 overflow-auto py-1">
-                        {savedList.map((s) => (
-                          <SavedAnalysisRow
-                            key={s.id}
-                            item={s}
-                            active={s.id === currentAnalysisId}
-                            onOpen={() => openAnalysis(s.id)}
-                            onDelete={() => deleteSaved(s.id)}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* "保存" — update the opened analysis (PUT) or create a new one (POST). */}
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setSaveName(currentAnalysisName || "")
-                  setSaveOpen((o) => !o)
-                }}
-                disabled={!table}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm transition-colors disabled:opacity-50 ${
-                  justSaved
-                    ? "border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
-                    : "border-border hover:border-emerald-500/40 hover:text-foreground"
+                onClick={() => setMode("dashboard")}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  mode === "dashboard"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {justSaved ? (
-                  <>
-                    <CheckIcon className="size-4" /> 已保存
-                  </>
-                ) : (
-                  <>
-                    <SaveIcon className="size-4" /> 保存
-                  </>
-                )}
+                <LayoutDashboardIcon className="size-4" /> 看板
               </button>
-              {saveOpen && (
-                <>
-                  <button
-                    className="fixed inset-0 z-10 cursor-default"
-                    aria-hidden
-                    onClick={() => setSaveOpen(false)}
-                  />
-                  <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-border bg-card p-3 shadow-lg">
-                    <div className="mb-2 text-xs text-muted-foreground">
-                      {currentAnalysisId ? "更新当前分析（可改名）" : "保存为新分析"}
-                    </div>
-                    <Input
-                      autoFocus
-                      value={saveName}
-                      onChange={(e) => setSaveName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") doSave()
-                      }}
-                      placeholder="分析名称"
-                      className="h-8"
-                    />
-                    <div className="mt-2 flex justify-end gap-2">
-                      <button
-                        onClick={() => setSaveOpen(false)}
-                        className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-                      >
-                        取消
-                      </button>
-                      <button
-                        onClick={doSave}
-                        disabled={!saveName.trim() || saveBusy}
-                        className="inline-flex items-center gap-1 rounded-md bg-emerald-500/90 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
-                      >
-                        {saveBusy && <Loader2Icon className="size-3 animate-spin" />}
-                        {currentAnalysisId ? "更新" : "保存"}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
+              <button
+                onClick={() => setMode("analysis")}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  mode === "analysis"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <RouteIcon className="size-4" /> 分析
+              </button>
             </div>
 
             {offline ? (
@@ -1052,384 +962,567 @@ export default function AnalysisPage() {
         </div>
       )}
 
-      {/* Analysis path breadcrumb: the traceable trail from the origin object set
-          through any pivots to the current lens. Segments are clickable to
-          backtrack (dropping later pivots). */}
-      {showPath && (
-        <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs">
-          <RouteIcon className="size-3.5 shrink-0 text-emerald-500" />
-          <span className="shrink-0 text-muted-foreground">分析路径</span>
-          <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
-          <button
-            onClick={goToOrigin}
-            disabled={!pivotActive}
-            className={`shrink-0 rounded px-1 py-0.5 ${
-              pivotActive
-                ? "text-muted-foreground hover:text-foreground"
-                : "font-medium text-foreground"
-            }`}
-          >
-            起始：{startLabel}({startCount.toLocaleString()})
-          </button>
-          {!pivotActive && cleanUserFilters.length > 0 && (
-            <>
-              <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
-              <span className="text-emerald-600 dark:text-emerald-400">
-                筛选：{filterSummary}({(result?.matched_rows ?? 0).toLocaleString()})
-              </span>
-            </>
-          )}
-          {pathSteps.map((s, i) => (
-            <React.Fragment key={`${s.targetTable}:${i}`}>
-              <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
-              <button
-                onClick={() => goToStep(i)}
-                className={`rounded px-1 py-0.5 ${
-                  i === pathSteps.length - 1
-                    ? "font-medium text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+      {/* Two page modes. "看板" is a full-bleed global metric board (no config
+          rail). "分析" is a centered, saveable document whose vertical step spine
+          *is* the analysis path — so the former breadcrumb is gone. */}
+      {mode === "dashboard" ? (
+        <DashboardCanvas
+          data={dashData}
+          loading={dashLoading}
+          metricCount={allMetrics.length}
+          offline={offline}
+          onRefresh={loadDashboard}
+        />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-5xl pb-6">
+            {/* Document head: analysis name + save + my-analyses (logic unchanged). */}
+            <div className="mb-6 flex flex-wrap items-center gap-3">
+              <h2
+                className="min-w-0 truncate font-heading text-lg font-semibold tracking-tight"
+                title={currentAnalysisName || "未命名分析"}
               >
-                {s.kind === "source"
-                  ? `来自对象浏览器：${s.desc}（${s.matched.toLocaleString()} 条）`
-                  : `沿『${s.linkLabel}』→ ${s.targetLabel}(${s.matched.toLocaleString()})`}
-              </button>
-            </React.Fragment>
-          ))}
-          {pivotActive && cleanUserFilters.length > 0 && (
-            <>
-              <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
-              <span className="text-emerald-600 dark:text-emerald-400">筛选：{filterSummary}</span>
-            </>
-          )}
-          <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 font-medium text-foreground">{LENS_STEP_LABEL[lens]}</span>
-        </div>
-      )}
-
-      {/* Contour/Quiver-style split: a control rail on the left, the data canvas
-          on the right. Narrow screens collapse the grid to a single column so the
-          two regions stack vertically. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
-        {/* ---- Left rail: every control lives here, scrolls independently. ---- */}
-        <div className="flex flex-col gap-3 overflow-y-auto">
-          {/* Object type picker — a vertical list matching the object browser rail. */}
-          <div className="rounded-xl border border-border bg-card p-3">
-            <div className="mb-2 text-xs font-medium text-muted-foreground">对象类型</div>
-            {tables.length === 0 ? (
-              <div className="text-sm text-muted-foreground">
-                {offline ? "分析服务未启动" : "加载中…"}
-              </div>
-            ) : (
-              <div className="space-y-0.5">
-                {tables.map((t) => {
-                  const active = t.name === tableName
-                  return (
-                    <button
-                      key={t.name}
-                      onClick={() => selectTable(t)}
-                      title={t.desc}
-                      className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
-                        active
-                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                          : "hover:bg-muted"
-                      }`}
-                    >
-                      <span className="truncate">{t.label}</span>
-                      <span className="text-xs text-muted-foreground">{t.row_count}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Filter bar — vertically stacked so the narrow rail never scrolls sideways. */}
-          <div className="rounded-xl border border-border bg-card p-3">
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <FilterIcon className="size-3" /> 过滤条件
-              <button
-                onClick={addFilter}
-                disabled={!table}
-                className="ml-auto inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
-              >
-                <PlusIcon className="size-3" /> 添加过滤
-              </button>
-            </div>
-            {filters.length === 0 ? (
-              <span className="text-xs text-muted-foreground">未设置过滤条件 · 使用全部数据</span>
-            ) : (
-              <div className="space-y-2">
-                {filters.map((f, i) => (
-                  <div
-                    key={i}
-                    className="space-y-1.5 rounded-md border border-border/60 bg-background/40 p-2"
+                {currentAnalysisName || "未命名分析"}
+              </h2>
+              <div className="ml-auto flex items-center gap-2">
+                {/* "我的分析" — open a saved analysis (two-click delete per item). */}
+                <div className="relative">
+                  <button
+                    onClick={() => setSavedMenuOpen((o) => !o)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground"
                   >
-                    <select
-                      className={SELECT_CLASS}
-                      value={f.field}
-                      onChange={(e) =>
-                        setFilters((all) => all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
-                      }
+                    <FolderOpenIcon className="size-4" /> 我的分析
+                    <ChevronDownIcon className="size-3.5" />
+                  </button>
+                  {savedMenuOpen && (
+                    <>
+                      <button
+                        className="fixed inset-0 z-10 cursor-default"
+                        aria-hidden
+                        onClick={() => setSavedMenuOpen(false)}
+                      />
+                      <div className="absolute right-0 z-20 mt-1 w-80 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+                        <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+                          已保存的分析
+                        </div>
+                        {savedList.length === 0 ? (
+                          <div className="px-3 py-5 text-center text-sm text-muted-foreground">
+                            {offline ? "分析服务未启动" : "暂无保存的分析"}
+                          </div>
+                        ) : (
+                          <div className="max-h-72 overflow-auto py-1">
+                            {savedList.map((s) => (
+                              <SavedAnalysisRow
+                                key={s.id}
+                                item={s}
+                                active={s.id === currentAnalysisId}
+                                onOpen={() => openAnalysis(s.id)}
+                                onDelete={() => deleteSaved(s.id)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* "保存" — update the opened analysis (PUT) or create a new one (POST). */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setSaveName(currentAnalysisName || "")
+                      setSaveOpen((o) => !o)
+                    }}
+                    disabled={!table}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm transition-colors disabled:opacity-50 ${
+                      justSaved
+                        ? "border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
+                        : "border-border hover:border-emerald-500/40 hover:text-foreground"
+                    }`}
+                  >
+                    {justSaved ? (
+                      <>
+                        <CheckIcon className="size-4" /> 已保存
+                      </>
+                    ) : (
+                      <>
+                        <SaveIcon className="size-4" /> 保存
+                      </>
+                    )}
+                  </button>
+                  {saveOpen && (
+                    <>
+                      <button
+                        className="fixed inset-0 z-10 cursor-default"
+                        aria-hidden
+                        onClick={() => setSaveOpen(false)}
+                      />
+                      <div className="absolute right-0 z-20 mt-1 w-72 rounded-lg border border-border bg-card p-3 shadow-lg">
+                        <div className="mb-2 text-xs text-muted-foreground">
+                          {currentAnalysisId ? "更新当前分析（可改名）" : "保存为新分析"}
+                        </div>
+                        <Input
+                          autoFocus
+                          value={saveName}
+                          onChange={(e) => setSaveName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") doSave()
+                          }}
+                          placeholder="分析名称"
+                          className="h-8"
+                        />
+                        <div className="mt-2 flex justify-end gap-2">
+                          <button
+                            onClick={() => setSaveOpen(false)}
+                            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            取消
+                          </button>
+                          <button
+                            onClick={doSave}
+                            disabled={!saveName.trim() || saveBusy}
+                            className="inline-flex items-center gap-1 rounded-md bg-emerald-500/90 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+                          >
+                            {saveBusy && <Loader2Icon className="size-3 animate-spin" />}
+                            {currentAnalysisId ? "更新" : "保存"}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* The step spine: each board carries a step icon linked to the next by
+                a vertical connector line. The board order is the analysis path. */}
+            <div>
+              {/* Board · 数据 — the starting object set, or an object-browser handoff. */}
+              <StepBoard icon={<TableIcon />} label="数据">
+                {sourceStep ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">来自对象浏览器</span>
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+                      {sourceStep.desc}
+                      <span className="text-muted-foreground">
+                        （{sourceStep.matched.toLocaleString()} 条）
+                      </span>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      全量 {startCount.toLocaleString()} 行
+                    </span>
+                    <button
+                      onClick={goToOrigin}
+                      title="清除移交，返回普通选择"
+                      className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-red-500/40 hover:text-red-500"
                     >
-                      {table?.columns.map((c) => (
-                        <option key={c.name} value={c.name}>
-                          {c.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex items-center gap-1.5">
+                      <XIcon className="size-3.5" /> 清除
+                    </button>
+                  </div>
+                ) : tables.length === 0 ? (
+                  <span className="text-sm text-muted-foreground">
+                    {offline ? "分析服务未启动" : "加载中…"}
+                  </span>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">对象类型</span>
                       <select
-                        className={`${SELECT_BASE} w-16 shrink-0`}
-                        value={f.op}
-                        onChange={(e) =>
-                          setFilters((all) =>
-                            all.map((x, j) => (j === i ? { ...x, op: e.target.value as FilterOp } : x))
-                          )
-                        }
+                        className={`${SELECT_BASE} min-w-[10rem]`}
+                        value={startTable}
+                        onChange={(e) => {
+                          const t = tables.find((x) => x.name === e.target.value)
+                          if (t) selectTable(t)
+                        }}
                       >
-                        {OP_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
+                        {tables.map((t) => (
+                          <option key={t.name} value={t.name}>
+                            {t.label}
                           </option>
                         ))}
                       </select>
-                      <Input
-                        className="h-8 min-w-0 flex-1"
-                        // User-entered filters are always scalar; arrays only ever
-                        // arrive as the (hidden) pivot-derived `in` filter.
-                        value={typeof f.value === "string" ? f.value : f.value.join(",")}
-                        placeholder="值"
-                        onChange={(e) =>
-                          setFilters((all) => all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
-                        }
-                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      全量 {startCount.toLocaleString()} 行
+                    </span>
+                  </div>
+                )}
+              </StepBoard>
+
+              {/* Boards · 跳转 — one per pivot hop. Deleting truncates this hop and
+                  everything after it (the former breadcrumb backtrack logic). */}
+              {pathSteps.map((s, i) =>
+                s.kind === "pivot" ? (
+                  <StepBoard
+                    key={`${s.targetTable}:${i}`}
+                    icon={<Share2Icon />}
+                    label={
+                      <>
+                        沿『{s.linkLabel}』→ {s.targetLabel}{" "}
+                        <span className="font-normal text-muted-foreground">
+                          （{s.matched.toLocaleString()} 条）
+                        </span>
+                      </>
+                    }
+                    sub={
+                      s.stepFilters.length > 0
+                        ? `基于：${summarizeFilters(s.stepFilters)}`
+                        : undefined
+                    }
+                    actions={
                       <button
-                        onClick={() => setFilters((all) => all.filter((_, j) => j !== i))}
-                        className="shrink-0 text-muted-foreground hover:text-red-500"
-                        aria-label="删除过滤"
+                        onClick={() => (i === 0 ? goToOrigin() : goToStep(i - 1))}
+                        title="删除此跳转及其后续步骤"
+                        aria-label="删除跳转"
+                        className="rounded-md p-1 text-muted-foreground transition-colors hover:text-red-500"
                       >
-                        <XIcon className="size-4" />
+                        <Trash2Icon className="size-4" />
                       </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Search Around: pivot the whole current object set to a related type. */}
-            {directions.length > 0 && (
-              <div className="relative mt-3 border-t border-border/60 pt-3">
-                <button
-                  onClick={() => setPivotMenuOpen((o) => !o)}
-                  disabled={pivotBusy || !table}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
-                >
-                  {pivotBusy ? (
-                    <Loader2Icon className="size-4 animate-spin" />
-                  ) : (
-                    <Share2Icon className="size-4" />
-                  )}
-                  沿关系跳转
-                </button>
-                {pivotMenuOpen && (
-                  <>
-                    <button
-                      className="fixed inset-0 z-10 cursor-default"
-                      aria-hidden
-                      onClick={() => setPivotMenuOpen(false)}
-                    />
-                    <div className="absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
-                      <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
-                        将当前对象集跳转到
-                      </div>
-                      <div className="max-h-64 overflow-auto py-1">
-                        {directions.map((d) => {
-                          const target = nodeById.get(d.targetTypeId)
-                          return (
-                            <button
-                              key={`${d.link.id}:${d.reverse}`}
-                              onClick={() => runPivot(d)}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
-                            >
-                              <ChevronRightIcon className="size-3.5 shrink-0 text-emerald-500" />
-                              <span className="min-w-0 truncate">
-                                沿『{d.link.display_name}』→ {target?.display_name ?? d.targetTypeId}
-                              </span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </>
-                )}
-                {pivotError && (
-                  <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{pivotError}</div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Lens-specific controls (table group-by/measures, chart metric/dimension).
-              Timeline/map need no extra controls, so this section is simply absent.
-              Under a pivot the chart lens routes through /analyze, so it reuses the
-              table group-by/measure controls instead of the cube metric pickers. */}
-          {(lens === "table" || (lens === "chart" && pivotActive)) && (
-            <TableControls
-              dimensions={dimensions}
-              measures={measures}
-              groupBy={groupBy}
-              setGroupBy={setGroupBy}
-              metrics={metrics}
-              setMetrics={setMetrics}
-            />
-          )}
-          {lens === "chart" && !pivotActive && chartMetrics.length > 0 && (
-            <ChartControls
-              chartMetrics={chartMetrics}
-              chartMetric={chartMetric}
-              chartMetricKey={chartMetricKey}
-              setChartMetricKey={(k) => {
-                setChartMetricKey(k)
-                setChartDimKey("")
-              }}
-              chartDimKey={chartDimKey}
-              setChartDimKey={setChartDimKey}
-            />
-          )}
-        </div>
-
-        {/* ---- Right canvas: lens switcher + compact stats + the data view. ---- */}
-        <div className="flex min-h-0 flex-col gap-3">
-          {/* Thin top bar: lens switcher on the left, context hint on the right. */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
-              {LENSES.map((l) => {
-                const disabled = !lensAvailable(l.key)
-                const disabledTitle =
-                  l.key === "dashboard"
-                    ? "暂无指标定义"
-                    : l.key === "timeline"
-                      ? "当前对象类型无时间属性"
-                      : l.key === "map"
-                        ? "当前对象类型无地理属性"
-                        : l.key === "chart"
-                          ? "当前对象类型无可用指标"
-                          : undefined
-                return (
-                  <button
-                    key={l.key}
-                    onClick={() => !disabled && setLens(l.key)}
-                    disabled={disabled}
-                    title={disabled ? disabledTitle : undefined}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                      disabled ? "cursor-not-allowed opacity-50" : ""
-                    } ${
-                      lens === l.key ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <l.icon className="size-4" /> {l.label}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="ml-auto truncate text-xs text-muted-foreground">
-              {lens === "dashboard"
-                ? `全局概览 · ${allMetrics.length} 个指标`
-                : table
-                  ? `分析上下文：${table.label} · 命中 ${(result?.matched_rows ?? 0).toLocaleString()} 行`
-                  : ""}
-            </div>
-          </div>
-
-          {/* Compact stat strip — the former big stat cards, squeezed to one line. */}
-          {lens === "table" && <TableStatStrip result={result} />}
-          {/* Under a pivot the chart reads the /analyze aggregate, so it reuses the
-              table stat strip; otherwise it shows the cube-metric strip. */}
-          {lens === "chart" && pivotActive && <TableStatStrip result={result} />}
-          {lens === "chart" && !pivotActive && chartMetrics.length > 0 && (
-            <ChartStatStrip metricResult={metricResult} />
-          )}
-
-          {/* Data area — takes all remaining height in the right column. */}
-          {lens === "dashboard" && (
-            <DashboardCanvas
-              data={dashData}
-              loading={dashLoading}
-              metricCount={allMetrics.length}
-              offline={offline}
-              onRefresh={loadDashboard}
-            />
-          )}
-
-          {lens === "table" && (
-            <div className="relative flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-card">
-              {/* Lightweight in-flight hint: a thin top bar plus a corner spinner.
-                  Old rows stay visible (dimmed) so the table never flashes empty. */}
-              {loading && (
-                <>
-                  <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 animate-pulse rounded-t-xl bg-emerald-500/70" />
-                  <Loader2Icon className="pointer-events-none absolute top-2 right-2 z-10 size-4 animate-spin text-emerald-500" />
-                </>
+                    }
+                  />
+                ) : null
               )}
-              <div
-                className={`min-h-0 flex-1 overflow-auto transition-opacity ${loading ? "opacity-60" : ""}`}
+
+              {/* Board · 筛选 — user filters on the current base table, plus the
+                  "沿关系跳转" action that inserts a pivot board before this one and
+                  clears the user filters (unchanged pivot behavior). */}
+              <StepBoard
+                icon={<FilterIcon />}
+                label="筛选"
+                actions={
+                  <button
+                    onClick={addFilter}
+                    disabled={!table}
+                    className="inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5 text-xs transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+                  >
+                    <PlusIcon className="size-3" /> 添加过滤
+                  </button>
+                }
               >
-                {!result ? (
-                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                    {offline ? "分析服务未启动" : "选择对象类型开始分析"}
-                  </div>
+                {filters.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">未设置过滤条件 · 使用全部数据</span>
                 ) : (
-                  <ResultTable
-                    result={result}
-                    table={table}
-                    orderBy={orderBy}
-                    orderDir={orderDir}
-                    onSort={toggleSort}
+                  <div className="space-y-2">
+                    {filters.map((f, i) => (
+                      <div key={i} className="flex flex-wrap items-center gap-2">
+                        <select
+                          className={`${SELECT_BASE} w-44`}
+                          value={f.field}
+                          onChange={(e) =>
+                            setFilters((all) =>
+                              all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x))
+                            )
+                          }
+                        >
+                          {table?.columns.map((c) => (
+                            <option key={c.name} value={c.name}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className={`${SELECT_BASE} w-16 shrink-0`}
+                          value={f.op}
+                          onChange={(e) =>
+                            setFilters((all) =>
+                              all.map((x, j) => (j === i ? { ...x, op: e.target.value as FilterOp } : x))
+                            )
+                          }
+                        >
+                          {OP_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          className="h-8 w-48 min-w-0"
+                          // User-entered filters are always scalar; arrays only ever
+                          // arrive as the (hidden) pivot-derived `in` filter.
+                          value={typeof f.value === "string" ? f.value : f.value.join(",")}
+                          placeholder="值"
+                          onChange={(e) =>
+                            setFilters((all) =>
+                              all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x))
+                            )
+                          }
+                        />
+                        <button
+                          onClick={() => setFilters((all) => all.filter((_, j) => j !== i))}
+                          className="shrink-0 text-muted-foreground hover:text-red-500"
+                          aria-label="删除过滤"
+                        >
+                          <XIcon className="size-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Search Around: pivot the whole current object set to a related type. */}
+                {directions.length > 0 && (
+                  <div className="relative mt-4 border-t border-border/60 pt-3">
+                    <button
+                      onClick={() => setPivotMenuOpen((o) => !o)}
+                      disabled={pivotBusy || !table}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+                    >
+                      {pivotBusy ? (
+                        <Loader2Icon className="size-4 animate-spin" />
+                      ) : (
+                        <PlusIcon className="size-4" />
+                      )}
+                      沿关系跳转
+                    </button>
+                    {pivotMenuOpen && (
+                      <>
+                        <button
+                          className="fixed inset-0 z-10 cursor-default"
+                          aria-hidden
+                          onClick={() => setPivotMenuOpen(false)}
+                        />
+                        <div className="absolute left-0 z-20 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+                          <div className="border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
+                            将当前对象集跳转到
+                          </div>
+                          <div className="max-h-64 overflow-auto py-1">
+                            {directions.map((d) => {
+                              const target = nodeById.get(d.targetTypeId)
+                              return (
+                                <button
+                                  key={`${d.link.id}:${d.reverse}`}
+                                  onClick={() => runPivot(d)}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
+                                >
+                                  <ChevronRightIcon className="size-3.5 shrink-0 text-emerald-500" />
+                                  <span className="min-w-0 truncate">
+                                    沿『{d.link.display_name}』→ {target?.display_name ?? d.targetTypeId}
+                                  </span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    {pivotError && (
+                      <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{pivotError}</div>
+                    )}
+                  </div>
+                )}
+
+                {/* Footer: the live match count for the current base table. */}
+                <div className="mt-4 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+                  命中{" "}
+                  <span className="font-medium tabular-nums text-foreground">
+                    {(result?.matched_rows ?? 0).toLocaleString()}
+                  </span>{" "}
+                  行
+                </div>
+              </StepBoard>
+
+              {/* Board · 视图 — grouping / measures, the lens tabs, and the result. */}
+              <StepBoard
+                icon={<BarChart3Icon />}
+                label="视图"
+                last
+                actions={
+                  <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+                    {LENSES.map((l) => {
+                      const disabled = !lensAvailable(l.key)
+                      const disabledTitle =
+                        l.key === "timeline"
+                          ? "当前对象类型无时间属性"
+                          : l.key === "map"
+                            ? "当前对象类型无地理属性"
+                            : l.key === "chart"
+                              ? "当前对象类型无可用指标"
+                              : undefined
+                      return (
+                        <button
+                          key={l.key}
+                          onClick={() => !disabled && setLens(l.key)}
+                          disabled={disabled}
+                          title={disabled ? disabledTitle : undefined}
+                          className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium transition-colors ${
+                            disabled ? "cursor-not-allowed opacity-50" : ""
+                          } ${
+                            lens === l.key
+                              ? "bg-muted text-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <l.icon className="size-4" /> {l.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                }
+              >
+                {/* Grouping / measure (or chart metric / dimension) controls — a
+                    horizontal strip in the board head. Under a pivot the chart lens
+                    routes through /analyze, so it reuses the table controls. */}
+                {(lens === "table" || (lens === "chart" && pivotActive)) && (
+                  <TableControls
+                    dimensions={dimensions}
+                    measures={measures}
+                    groupBy={groupBy}
+                    setGroupBy={setGroupBy}
+                    metrics={metrics}
+                    setMetrics={setMetrics}
                   />
                 )}
-              </div>
-              {/* Detail-mode pager: server-side pages of DETAIL_PAGE_SIZE rows. */}
-              {result?.mode === "detail" && result.matched_rows > 0 && (
-                <Pagination
-                  page={page}
-                  pageSize={DETAIL_PAGE_SIZE}
-                  total={result.matched_rows}
-                  pages={Math.max(1, Math.ceil(result.matched_rows / DETAIL_PAGE_SIZE))}
-                  onPageChange={setPage}
-                  className="shrink-0 border-t border-border"
-                />
-              )}
-            </div>
-          )}
+                {lens === "chart" && !pivotActive && chartMetrics.length > 0 && (
+                  <ChartControls
+                    chartMetrics={chartMetrics}
+                    chartMetric={chartMetric}
+                    chartMetricKey={chartMetricKey}
+                    setChartMetricKey={(k) => {
+                      setChartMetricKey(k)
+                      setChartDimKey("")
+                    }}
+                    chartDimKey={chartDimKey}
+                    setChartDimKey={setChartDimKey}
+                  />
+                )}
 
-          {lens === "chart" &&
-            (pivotActive ? (
-              <PivotChartCanvas result={result} offline={offline} />
-            ) : (
-              <ChartCanvas chartMetrics={chartMetrics} metricResult={metricResult} offline={offline} />
-            ))}
+                {/* Compact stat strip (aggregate totals / metric overall). */}
+                {lens === "table" && <TableStatStrip result={result} />}
+                {lens === "chart" && pivotActive && <TableStatStrip result={result} />}
+                {lens === "chart" && !pivotActive && chartMetrics.length > 0 && (
+                  <ChartStatStrip metricResult={metricResult} />
+                )}
 
-          {lens === "timeline" && (
-            <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-              {timeCol ? (
-                <TimelineView rows={timelineRows} columns={table?.columns ?? []} timeCol={timeCol} />
-              ) : null}
-            </div>
-          )}
+                {/* Result — a fixed-height frame so every lens fills the same slot. */}
+                <div className="mt-3 flex h-[540px] flex-col">
+                  {lens === "table" && (
+                    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
+                      {/* Lightweight in-flight hint: a thin top bar plus a corner
+                          spinner. Old rows stay visible (dimmed), never flash empty. */}
+                      {loading && (
+                        <>
+                          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 animate-pulse rounded-t-xl bg-emerald-500/70" />
+                          <Loader2Icon className="pointer-events-none absolute top-2 right-2 z-10 size-4 animate-spin text-emerald-500" />
+                        </>
+                      )}
+                      <div
+                        className={`min-h-0 flex-1 overflow-auto transition-opacity ${loading ? "opacity-60" : ""}`}
+                      >
+                        {!result ? (
+                          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                            {offline ? "分析服务未启动" : "选择对象类型开始分析"}
+                          </div>
+                        ) : (
+                          <ResultTable
+                            result={result}
+                            table={table}
+                            orderBy={orderBy}
+                            orderDir={orderDir}
+                            onSort={toggleSort}
+                          />
+                        )}
+                      </div>
+                      {/* Detail-mode pager: server-side pages of DETAIL_PAGE_SIZE rows. */}
+                      {result?.mode === "detail" && result.matched_rows > 0 && (
+                        <Pagination
+                          page={page}
+                          pageSize={DETAIL_PAGE_SIZE}
+                          total={result.matched_rows}
+                          pages={Math.max(1, Math.ceil(result.matched_rows / DETAIL_PAGE_SIZE))}
+                          onPageChange={setPage}
+                          className="shrink-0 border-t border-border"
+                        />
+                      )}
+                    </div>
+                  )}
 
-          {lens === "map" && (
-            <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-              {geoCol ? <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} /> : null}
+                  {lens === "chart" &&
+                    (pivotActive ? (
+                      <PivotChartCanvas result={result} offline={offline} />
+                    ) : (
+                      <ChartCanvas
+                        chartMetrics={chartMetrics}
+                        metricResult={metricResult}
+                        offline={offline}
+                      />
+                    ))}
+
+                  {lens === "timeline" && (
+                    <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
+                      {timeCol ? (
+                        <TimelineView
+                          rows={timelineRows}
+                          columns={table?.columns ?? []}
+                          timeCol={timeCol}
+                        />
+                      ) : null}
+                    </div>
+                  )}
+
+                  {lens === "map" && (
+                    <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
+                      {geoCol ? <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} /> : null}
+                    </div>
+                  )}
+                </div>
+              </StepBoard>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </PageContainer>
   )
 }
 
-// --- Left-rail control: table lens group-by + measures. ---
+// --- One board in the analysis document's vertical "step spine". The icon
+// column on the left carries a connector line down to the next board; the card
+// on the right holds the step header (label + optional subtitle + right-aligned
+// actions) and an optional body. Purely presentational. ---
+
+function StepBoard({
+  icon,
+  label,
+  sub,
+  actions,
+  last,
+  children,
+}: {
+  icon: React.ReactNode
+  label: React.ReactNode
+  sub?: React.ReactNode
+  actions?: React.ReactNode
+  last?: boolean
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="flex gap-4">
+      {/* Step icon + connector line (the spine). The line fills the row below the
+          icon; with no vertical gap between rows it meets the next icon. */}
+      <div className="flex flex-col items-center">
+        <div className="z-10 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-emerald-500 [&_svg]:size-4">
+          {icon}
+        </div>
+        {!last && <div className="w-px flex-1 bg-border" />}
+      </div>
+      {/* Board card. */}
+      <div className="min-w-0 flex-1 pb-6">
+        <div className="rounded-xl border border-border bg-card">
+          <div className="flex items-start gap-3 border-b border-border px-4 py-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-foreground">{label}</div>
+              {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
+            </div>
+            {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+          </div>
+          {children != null && <div className="p-4">{children}</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- View-board control: table lens group-by + measures (horizontal strip). ---
 
 function TableControls({
   dimensions,
@@ -1447,83 +1540,84 @@ function TableControls({
   setMetrics: React.Dispatch<React.SetStateAction<MetricSpec[]>>
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <div className="mb-2 text-xs font-medium text-muted-foreground">分组维度</div>
-      <select
-        className={`${SELECT_CLASS} mb-3 disabled:opacity-50`}
-        value={groupBy}
-        disabled={metrics.length === 0}
-        onChange={(e) => setGroupBy(e.target.value)}
-      >
-        <option value="">不分组（整体汇总）</option>
-        {dimensions.map((d) => (
-          <option key={d.name} value={d.name}>
-            {d.label}
-          </option>
-        ))}
-      </select>
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      {/* Grouping dimension. */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">分组维度</span>
+        <select
+          className={`${SELECT_BASE} disabled:opacity-50`}
+          value={groupBy}
+          disabled={metrics.length === 0}
+          onChange={(e) => setGroupBy(e.target.value)}
+        >
+          <option value="">不分组（整体汇总）</option>
+          {dimensions.map((d) => (
+            <option key={d.name} value={d.name}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <span>度量</span>
+      {/* Measures — inline pills; empty = detail mode. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">度量</span>
+        {metrics.length === 0 && (
+          <span className="text-xs text-muted-foreground">无 · 明细模式（显示全部行）</span>
+        )}
+        {metrics.map((m, i) => (
+          <div key={i} className="flex items-center gap-1 rounded-md border border-border/60 px-1.5 py-1">
+            <select
+              className={`${SELECT_BASE} px-1.5 py-1`}
+              value={m.field}
+              onChange={(e) =>
+                setMetrics((all) => all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
+              }
+            >
+              {measures.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <select
+              className={`${SELECT_BASE} w-16 shrink-0 px-1.5 py-1`}
+              value={m.agg}
+              onChange={(e) =>
+                setMetrics((all) =>
+                  all.map((x, j) => (j === i ? { ...x, agg: e.target.value as MetricAgg } : x))
+                )
+              }
+            >
+              {AGG_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => setMetrics((all) => all.filter((_, j) => j !== i))}
+              className="shrink-0 text-muted-foreground hover:text-red-500"
+              aria-label="删除度量"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </div>
+        ))}
         {measures.length > 0 && metrics.length < 3 && (
           <button
             onClick={() => setMetrics((m) => [...m, { field: measures[0].name, agg: "sum" }])}
-            className="ml-auto inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-0.5 text-xs hover:border-emerald-500/40 hover:text-foreground"
+            className="inline-flex items-center gap-0.5 rounded-md border border-border px-1.5 py-1 text-xs hover:border-emerald-500/40 hover:text-foreground"
           >
             <PlusIcon className="size-3" /> 添加度量
           </button>
         )}
       </div>
-      {metrics.length === 0 ? (
-        <span className="text-xs text-muted-foreground">无 · 明细模式（显示全部行）</span>
-      ) : (
-        <div className="space-y-2">
-          {metrics.map((m, i) => (
-            <div key={i} className="flex items-center gap-1.5 rounded-md border border-border/60 p-2">
-              <select
-                className={`${SELECT_BASE} min-w-0 flex-1`}
-                value={m.field}
-                onChange={(e) =>
-                  setMetrics((all) => all.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
-                }
-              >
-                {measures.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                className={`${SELECT_BASE} w-16 shrink-0`}
-                value={m.agg}
-                onChange={(e) =>
-                  setMetrics((all) =>
-                    all.map((x, j) => (j === i ? { ...x, agg: e.target.value as MetricAgg } : x))
-                  )
-                }
-              >
-                {AGG_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => setMetrics((all) => all.filter((_, j) => j !== i))}
-                className="shrink-0 text-muted-foreground hover:text-red-500"
-                aria-label="删除度量"
-              >
-                <XIcon className="size-4" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
 
-// --- Left-rail control: chart lens metric + dimension pickers. ---
+// --- View-board control: chart lens metric + dimension pickers (horizontal). ---
 
 function ChartControls({
   chartMetrics,
@@ -1541,38 +1635,40 @@ function ChartControls({
   setChartDimKey: (k: string) => void
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <div className="mb-2 text-xs font-medium text-muted-foreground">指标</div>
-      <select
-        className={`${SELECT_CLASS} mb-3`}
-        value={chartMetricKey}
-        onChange={(e) => setChartMetricKey(e.target.value)}
-      >
-        {chartMetrics.map((m) => (
-          <option key={m.key} value={m.key}>
-            {m.label}
-          </option>
-        ))}
-      </select>
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">指标</span>
+        <select
+          className={SELECT_BASE}
+          value={chartMetricKey}
+          onChange={(e) => setChartMetricKey(e.target.value)}
+        >
+          {chartMetrics.map((m) => (
+            <option key={m.key} value={m.key}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <div className="mb-2 text-xs font-medium text-muted-foreground">维度</div>
-      <select
-        className={SELECT_CLASS}
-        value={chartDimKey}
-        onChange={(e) => setChartDimKey(e.target.value)}
-      >
-        <option value="">整体</option>
-        {chartMetric?.dimensions.map((d) => (
-          <option key={d.key} value={d.key}>
-            {d.label}
-          </option>
-        ))}
-      </select>
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">维度</span>
+        <select
+          className={SELECT_BASE}
+          value={chartDimKey}
+          onChange={(e) => setChartDimKey(e.target.value)}
+        >
+          <option value="">整体</option>
+          {chartMetric?.dimensions.map((d) => (
+            <option key={d.key} value={d.key}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {chartMetric?.description && (
-        <div className="mt-3 border-t border-border/60 pt-2 text-xs text-muted-foreground">
-          {chartMetric.description}
-        </div>
+        <span className="text-xs text-muted-foreground">{chartMetric.description}</span>
       )}
     </div>
   )
