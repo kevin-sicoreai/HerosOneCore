@@ -4,7 +4,6 @@ import {
   DatabaseIcon,
   GaugeIcon,
   LayoutDashboardIcon,
-  LayoutGridIcon,
   LayoutTemplateIcon,
   Share2Icon,
   ShieldCheckIcon,
@@ -31,10 +30,10 @@ export type AppDef = {
 
 // The App launcher / left-rail registry, grouped by the architecture's layers.
 // AIP sits on top; the 分析洞察 layer covers analytics (metrics & dashboards,
-// object exploration), metric semantics (口径) and the app builder — authoring
-// of business apps lives here rather than in the 业务应用 layer, which is now
-// consumption-only. The 数据与本体 layer stays admin-facing. Governance is
-// cross-cutting but also gets a console.
+// object exploration), metric semantics (口径) and the app builder. Business
+// apps have no menu group of their own: authoring lives in 应用构建器 and the
+// /apps runtime routes stay reachable from there (打开/预览). The 数据与本体
+// layer stays admin-facing. Governance is cross-cutting but also gets a console.
 export const APP_LAYERS: AppLayer[] = [
   {
     key: "aip",
@@ -46,22 +45,6 @@ export const APP_LAYERS: AppLayer[] = [
         href: "/assist",
         icon: BotIcon,
         desc: "对话式助手，展示检索与推理全过程",
-      },
-    ],
-  },
-  {
-    // Business applications served by the native runtime. Consumption-only:
-    // browse and run published apps. Authoring (create / edit / publish /
-    // delete) now lives in the 分析洞察 layer's 应用构建器.
-    key: "apps",
-    label: "业务应用",
-    apps: [
-      {
-        key: "apps",
-        title: "应用目录",
-        href: "/apps",
-        icon: LayoutGridIcon,
-        desc: "浏览并运行已发布的业务应用",
       },
     ],
   },
