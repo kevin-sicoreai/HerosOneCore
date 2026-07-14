@@ -6,28 +6,42 @@
     "dimensions": {
       "status": "support_ticket.status",
       "priority": "support_ticket.priority",
-      "category": "support_ticket.category"
+      "category": "support_ticket.category",
+      "customer_tier": "customer.tier",
+      "customer_region": "customer.region"
     }
   },
   "ops_ticket_satisfaction": {
     "base_cube": "support_ticket",
     "measure": "support_ticket.ops_ticket_satisfaction",
     "matched_measure": "support_ticket.ops_ticket_satisfaction_matched",
-    "dimensions": {}
+    "dimensions": {
+      "category": "support_ticket.category",
+      "priority": "support_ticket.priority",
+      "customer_tier": "customer.tier"
+    }
   },
   "ops_order_amount": {
     "base_cube": "order",
     "measure": "order.ops_order_amount",
     "matched_measure": "order.ops_order_amount_matched",
     "dimensions": {
-      "status": "order.status"
+      "status": "order.status",
+      "customer_region": "customer.region",
+      "customer_industry": "customer.industry",
+      "customer_tier": "customer.tier",
+      "sales_rep_name": "sales_rep.name"
     }
   },
   "ops_device_active_rate": {
     "base_cube": "device",
     "measure": "device.ops_device_active_rate",
     "matched_measure": "device.ops_device_active_rate_matched",
-    "dimensions": {}
+    "dimensions": {
+      "type": "device.type",
+      "brand": "device.brand",
+      "user_city": "employee.city"
+    }
   },
   "ops_maintenance_count": {
     "base_cube": "maintenance_order",
@@ -35,7 +49,9 @@
     "matched_measure": "maintenance_order.ops_maintenance_count_matched",
     "dimensions": {
       "status": "maintenance_order.status",
-      "issue": "maintenance_order.issue"
+      "issue": "maintenance_order.issue",
+      "device_type": "device.type",
+      "device_brand": "device.brand"
     }
   }
 }

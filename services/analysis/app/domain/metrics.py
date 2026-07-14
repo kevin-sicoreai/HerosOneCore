@@ -121,8 +121,11 @@ def describe(metric: "Metric") -> str:
 
 
 # Registry keyed by metric.key. Covers the current 10.1.0.4 ops dataset
-# (sales / customer-service / device-maintenance). Every metric slices on a
-# column of its own base type, so no cross-object link joins are needed here.
+# (sales / customer-service / device-maintenance). The catalog includes
+# cross-object dimensions reached through ontology links: any Dimension carrying
+# a ``via_link`` (link display_name) slices on a property of a far object type,
+# and the seeder resolves that display_name to a link id against the live
+# ontology at seed time (populating ``via_link_id``).
 # ``description`` is left empty on purpose: the read path derives the 口径
 # sentence from the structure via describe(), keyed off BASE_LABELS/_PROP_LABELS.
 METRICS: dict[str, Metric] = {
@@ -139,6 +142,8 @@ METRICS: dict[str, Metric] = {
                 Dimension("status", "状态", "status"),
                 Dimension("priority", "优先级", "priority"),
                 Dimension("category", "类别", "category"),
+                Dimension("customer_tier", "客户等级", "tier", via_link="报障客户"),
+                Dimension("customer_region", "客户区域", "region", via_link="报障客户"),
             ],
         ),
         Metric(
@@ -149,6 +154,11 @@ METRICS: dict[str, Metric] = {
             agg="avg",
             measure="satisfaction",
             unit="分",
+            dimensions=[
+                Dimension("category", "类别", "category"),
+                Dimension("priority", "优先级", "priority"),
+                Dimension("customer_tier", "客户等级", "tier", via_link="报障客户"),
+            ],
         ),
         Metric(
             key="ops_order_amount",
@@ -160,6 +170,10 @@ METRICS: dict[str, Metric] = {
             unit="元",
             dimensions=[
                 Dimension("status", "状态", "status"),
+                Dimension("customer_region", "客户区域", "region", via_link="下单客户"),
+                Dimension("customer_industry", "客户行业", "industry", via_link="下单客户"),
+                Dimension("customer_tier", "客户等级", "tier", via_link="下单客户"),
+                Dimension("sales_rep_name", "销售代表", "name", via_link="负责销售"),
             ],
         ),
         Metric(
@@ -170,6 +184,11 @@ METRICS: dict[str, Metric] = {
             agg="rate",
             unit="%",
             numerator=("status", "在用"),
+            dimensions=[
+                Dimension("type", "类型", "type"),
+                Dimension("brand", "品牌", "brand"),
+                Dimension("user_city", "使用人城市", "city", via_link="使用人"),
+            ],
         ),
         Metric(
             key="ops_maintenance_count",
@@ -181,6 +200,8 @@ METRICS: dict[str, Metric] = {
             dimensions=[
                 Dimension("status", "状态", "status"),
                 Dimension("issue", "故障类别", "issue"),
+                Dimension("device_type", "设备类型", "type", via_link="维保设备"),
+                Dimension("device_brand", "设备品牌", "brand", via_link="维保设备"),
             ],
         ),
     ]
