@@ -1,0 +1,181 @@
+# HerosOneCore — 10.1.0.4 deployment.
+#
+# Topology: 8 FastAPI services (internal only) + Next.js web (internal) +
+# nginx gateway (the only published port). Backends talk to each other by
+# compose service name; nginx strips /api/<svc>/ and proxies to each. Postgres,
+# MinIO, OpenMetadata and the vLLM Qwen already run on 10.1.0.4 and are reached
+# by host IP — this stack never touches those containers.
+#
+# Secrets/config: shared keys come from ${WORKSPACE}/config/hoc.env (env_file);
+# the DB base URL + prefix come from deploy/.env (compose interpolation) so no
+# credential is committed in this file. Copy the two *.example files first.
+#
+#   cp deploy/.env.example deploy/.env                       # META_DB_BASE_URL, DB_PREFIX, GATEWAY_PORT
+#   cp deploy/hoc.env.example /workspace/herosonecore/config/hoc.env   # then fill secrets
+#   mkdir -p /workspace/herosonecore/pipeline
+#   docker compose -f deploy/docker-compose.yml up -d
+
+name: herosonecore
+
+x-common: &common
+  restart: unless-stopped
+  env_file: ["/workspace/herosonecore/config/hoc.env"]
+  networks: ["hoc"]
+
+services:
+  auth:
+    <<: *common
+    image: herosonecore-auth:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: auth } }
+    environment:
+      PORT: "8005"
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}auth"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  data:
+    <<: *common
+    image: herosonecore-data:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: data } }
+    environment:
+      PORT: "8000"
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}data"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  pipeline:
+    <<: *common
+    image: herosonecore-pipeline:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: pipeline } }
+    environment:
+      PORT: "8001"
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}pipeline"
+      DBT_EXECUTABLE: "dbt"          # installed on PATH by dbt-duckdb in the image
+      WORK_DIR: "/app/_pipelines"    # dbt compile scratch (bind-mounted below)
+      MART_DIR: "/app/_dataplane/mart"  # used only when STORAGE_BACKEND=local
+    volumes:
+      - /workspace/herosonecore/pipeline:/app/_pipelines
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  ontology:
+    <<: *common
+    image: herosonecore-ontology:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: ontology } }
+    environment:
+      PORT: "8003"
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}ontology"
+      PREVIEW_MAX_LIMIT: "50000"     # PK lookups scan the full object set
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  governance:
+    <<: *common
+    image: herosonecore-governance:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: governance } }
+    environment:
+      PORT: "8004"
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}governance"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  analysis:
+    <<: *common
+    image: herosonecore-analysis:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: analysis } }
+    environment:
+      PORT: "8008"
+      # analysis defaults to SQLite + Cube engine on Linux; force Postgres +
+      # the in-process native engine (matches the Windows ops launcher).
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}analysis"
+      METRICS_ENGINE: "native"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 50s
+
+  assist:
+    <<: *common
+    image: herosonecore-assist:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: assist } }
+    environment:
+      PORT: "8006"
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}assist"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  app-builder:
+    <<: *common
+    image: herosonecore-app-builder:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.svc, args: { SERVICE: app-builder } }
+    environment:
+      PORT: "8002"
+      DATABASE_URL: "${META_DB_BASE_URL}/${DB_PREFIX}app_builder"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  web:
+    image: herosonecore-web:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.web }
+    restart: unless-stopped
+    networks: ["hoc"]
+    # No env_file: the frontend needs no secrets at runtime (client uses relative
+    # /api/* paths, which nginx proxies).
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  nginx:
+    image: herosonecore-nginx:latest
+    build: { context: .., dockerfile: deploy/Dockerfile.nginx }
+    restart: unless-stopped
+    networks: ["hoc"]
+    ports:
+      - "${GATEWAY_PORT:-3000}:80"   # the ONLY published port → http://10.1.0.4:<GATEWAY_PORT>
+    depends_on:
+      - web
+      - auth
+      - data
+      - pipeline
+      - ontology
+      - governance
+      - analysis
+      - assist
+      - app-builder
+
+networks:
+  hoc:
+    driver: bridge

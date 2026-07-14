@@ -1,0 +1,35 @@
+# Build-context excludes. Context = repo root (see deploy/docker-compose.yml).
+# Keep the image slim and never bake secrets or local state into a layer.
+
+# Python
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Node / Next
+**/node_modules
+**/.next
+apps/web/out
+
+# Local state / data-plane / service DBs (must stay external: Postgres + MinIO)
+**/_dataplane
+**/_pipelines
+**/var
+**/*.db
+**/*.sqlite*
+
+# Secrets & per-service local env — injected at runtime via compose env_file,
+# never copied into the image.
+**/.env
+config/*.env
+!config/example.env
+
+# VCS / editor / docs / PoC (not needed to run the services)
+.git
+.gitignore
+**/.DS_Store
+docs
+poc

@@ -1,0 +1,36 @@
+# Generic image for any of the 8 FastAPI microservices. They share an identical
+# layout (pyproject.toml + app/), so one parameterized Dockerfile covers all —
+# no per-service Dockerfile is written into the (partner-owned) service dirs.
+#
+#   docker build -f deploy/Dockerfile.svc --build-arg SERVICE=<name> -t hoc-<name> .
+#
+# Build context MUST be the repo root. Python 3.12 satisfies every service,
+# including pipeline's dbt-duckdb (dbt does not support 3.14).
+FROM python:3.12-slim AS base
+
+ARG SERVICE
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUTF8=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Install dependencies first (better layer caching). All runtime deps ship as
+# manylinux wheels (fastapi/uvicorn/psycopg[binary]/duckdb/dbt-duckdb/langchain),
+# so no compiler toolchain is needed on the slim base. If a future dep needs to
+# compile, add: RUN apt-get update && apt-get install -y --no-install-recommends gcc
+COPY services/${SERVICE}/pyproject.toml ./
+COPY services/${SERVICE}/app ./app
+RUN pip install .
+# Safety net: some services import httpx at runtime but declare it only under
+# [dev] (e.g. data/app/core/audit.py), so a production `pip install .` misses it
+# and the app crashes on import. Ensure it is always present. Harmless for
+# services that already declare it. (psycopg is declared where the DB is used.)
+RUN pip install "httpx>=0.27"
+
+# uvicorn binds 0.0.0.0 (containers are reached by service name across the
+# compose network, never 127.0.0.1). PORT is supplied per-service by compose.
+ENV PORT=8000
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

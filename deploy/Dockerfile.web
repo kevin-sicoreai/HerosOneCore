@@ -1,0 +1,32 @@
+# Frontend image: Next.js 16 built with Webpack, served by `next start` (a
+# long-lived Node server). Static export is NOT viable — the app has runtime
+# dynamic routes (app/apps/[id], app/apps/builder/[id]) with no
+# generateStaticParams — so nginx sits in front of this container as the gateway
+# and this container renders the app. Build context MUST be the repo root.
+#
+# NOTE: `next build` fetches Google Fonts (next/font/google: Geist/Inter) at
+# build time, so build on a host with outbound internet (the dev box), then
+# `docker save | ssh 10.1.0.4 docker load`.
+FROM node:20-slim
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000
+
+WORKDIR /app
+
+# Install exactly what package-lock.json pins (reproducible), then build.
+# --include=dev is required: NODE_ENV=production would otherwise make npm skip
+# devDependencies, but the build needs them (@tailwindcss/postcss, tailwindcss,
+# typescript, eslint-config-next). They stay in the image; next start ignores them.
+COPY apps/web/package.json apps/web/package-lock.json ./
+RUN npm ci --include=dev
+
+COPY apps/web/ ./
+# The build script pins --webpack on purpose (Next 16 defaults to Turbopack);
+# keep it. Client code fetches relative /api/* paths — those are proxied by
+# nginx, so no NEXT_PUBLIC_*_API_URL needs to be baked in here.
+RUN npm run build
+
+# Bind all interfaces; nginx reaches it as http://web:3000 on the compose net.
+CMD ["sh", "-c", "exec node_modules/.bin/next start -H 0.0.0.0 -p ${PORT}"]

@@ -1,0 +1,5 @@
+# Gateway image = stock nginx + our config baked in, so the whole stack ships as
+# self-contained images (build on the dev box, `docker save | load` on 10.1.0.4)
+# with no host-side config file to keep in sync. Build context = repo root.
+FROM nginx:1.27-alpine
+COPY deploy/nginx.conf /etc/nginx/nginx.conf
