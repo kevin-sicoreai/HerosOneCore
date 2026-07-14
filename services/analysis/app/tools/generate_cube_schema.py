@@ -107,9 +107,12 @@ def _cube_type(data_type: str) -> str:
     return "string"
 
 
-def _container_path(dataset: dict) -> str:
-    """Host storage_uri -> in-container parquet path (/data/<layer>/<filename>)."""
-    filename = re.split(r"[\\/]", dataset["storage_uri"])[-1]
+def _parquet_path(dataset: dict) -> str:
+    """storage_uri -> parquet path DuckDB reads: S3 URI as-is, else legacy /data mount."""
+    uri = dataset["storage_uri"]
+    if uri.startswith("s3://"):
+        return uri
+    filename = re.split(r"[\\/]", uri)[-1]
     layer = dataset.get("layer", "raw")
     sub = "mart" if layer == "mart" else "raw"
     return f"/data/{sub}/{filename}"
@@ -190,7 +193,7 @@ def _cube_yaml(
         "# regenerate with `python -m app.tools.generate_cube_schema`.",
         "cubes:",
         f"  - name: {api_name}",
-        f"    sql: SELECT * FROM read_parquet('{_container_path(dataset)}')",
+        f"    sql: SELECT * FROM read_parquet('{_parquet_path(dataset)}')",
     ]
 
     if outgoing_links:

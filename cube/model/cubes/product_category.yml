@@ -2,7 +2,7 @@
 # regenerate with `python -m app.tools.generate_cube_schema`.
 cubes:
   - name: product_category
-    sql: SELECT * FROM read_parquet('/data/raw/product_categories.parquet')
+    sql: SELECT * FROM read_parquet('s3://herosonecore-dev/raw/4db2b2a7cf464c9db355191393f3e23b/product_categories.parquet')
 
     dimensions:
       - name: id

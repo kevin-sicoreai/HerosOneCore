@@ -2,7 +2,7 @@
 # regenerate with `python -m app.tools.generate_cube_schema`.
 cubes:
   - name: fixed_asset
-    sql: SELECT * FROM read_parquet('/data/raw/fixed_assets.parquet')
+    sql: SELECT * FROM read_parquet('s3://herosonecore-dev/raw/4db2b2a7cf464c9db355191393f3e23b/fixed_assets.parquet')
 
     joins:
       - name: department

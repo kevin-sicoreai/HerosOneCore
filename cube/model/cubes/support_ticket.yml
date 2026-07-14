@@ -2,7 +2,7 @@
 # regenerate with `python -m app.tools.generate_cube_schema`.
 cubes:
   - name: support_ticket
-    sql: SELECT * FROM read_parquet('/data/raw/support_tickets.parquet')
+    sql: SELECT * FROM read_parquet('s3://herosonecore-dev/raw/4db2b2a7cf464c9db355191393f3e23b/support_tickets.parquet')
 
     joins:
       - name: order
