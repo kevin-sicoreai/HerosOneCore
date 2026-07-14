@@ -4,7 +4,6 @@ import * as React from "react"
 import Link from "next/link"
 import {
   BlocksIcon,
-  BoxesIcon,
   ChevronRightIcon,
   ClockIcon,
   CpuIcon,
@@ -35,7 +34,7 @@ import { findApp } from "@/lib/apps"
 import { readRecent, type RecentEntry } from "@/lib/recent"
 import { MetricBarChart } from "@/components/metric-bar-chart"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
-import { PageContainer, PageHeading } from "@/components/page-container"
+import { PageContainer } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -117,18 +116,7 @@ export default function HomePage() {
   ]
 
   return (
-    <PageContainer>
-      <PageHeading
-        title="工作台"
-        desc="统一数据底座 · 一切资源挂在同一套本体上，打开工具即操作资源"
-        icon={<BoxesIcon />}
-        actions={
-          <Button variant="outline" size="sm" render={<Link href="/ontology" />}>
-            <Share2Icon /> 打开本体
-          </Button>
-        }
-      />
-
+    <PageContainer className="gap-4">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
         {STATS.map((s) => (
           <Card key={s.label} className="gap-0 py-0">

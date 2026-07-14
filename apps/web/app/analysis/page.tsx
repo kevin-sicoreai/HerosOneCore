@@ -15,9 +15,7 @@ import {
   Loader2Icon,
   MapIcon,
   PlusIcon,
-  RadarIcon,
   RefreshCwIcon,
-  RouteIcon,
   SaveIcon,
   Share2Icon,
   SparklesIcon,
@@ -65,7 +63,7 @@ import {
   type ModelInfo,
 } from "@/lib/assist-api"
 import { fieldLabel } from "@/lib/field-labels"
-import { PageContainer, PageHeading } from "@/components/page-container"
+import { PageContainer } from "@/components/page-container"
 import { MapView, TimelineView } from "@/components/object-lenses"
 import { MetricBarChart } from "@/components/metric-bar-chart"
 import { Badge } from "@/components/ui/badge"
@@ -951,69 +949,7 @@ export default function AnalysisPage() {
   }
 
   return (
-    <PageContainer className="h-full">
-      <PageHeading
-        title="分析工作台"
-        desc="围绕对象集的指标、图表、时间轴与地理分析"
-        icon={<RadarIcon />}
-        actions={
-          <div className="flex items-center gap-2">
-            {/* Model selector: the LLM every assist feature on this page drives.
-                Hidden until (and unless) the assist /meta call succeeds. */}
-            {models.length > 0 && (
-              <select
-                className={`${SELECT_BASE} py-1 text-xs`}
-                value={modelId}
-                title="选择 AI 模型"
-                onChange={(e) => {
-                  setModelId(e.target.value)
-                  persistSelectedModel(e.target.value)
-                }}
-              >
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.display_name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {/* Top-level mode switch: 看板 (global board) vs 分析 (step-board document).
-                The save / open controls live inside the analysis document head. */}
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
-              <button
-                onClick={() => setMode("dashboard")}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  mode === "dashboard"
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <LayoutDashboardIcon className="size-4" /> 看板
-              </button>
-              <button
-                onClick={() => setMode("analysis")}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  mode === "analysis"
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <RouteIcon className="size-4" /> 分析
-              </button>
-            </div>
-
-            {offline ? (
-              <Badge variant="warning">
-                <WifiOffIcon /> 分析服务未启动
-              </Badge>
-            ) : (
-              <Badge variant="brand">数据分析</Badge>
-            )}
-          </div>
-        }
-      />
-
+    <PageContainer className="h-full gap-3">
       {/* Replay / save notice — non-fatal, dismissible. */}
       {replayError && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
@@ -1038,12 +974,25 @@ export default function AnalysisPage() {
           metricCount={allMetrics.length}
           offline={offline}
           onRefresh={loadDashboard}
+          models={models}
+          modelId={modelId}
+          onModelChange={(id) => {
+            setModelId(id)
+            persistSelectedModel(id)
+          }}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-5xl pb-6">
             {/* Document head: analysis name + save + my-analyses (logic unchanged). */}
             <div className="mb-6 flex flex-wrap items-center gap-3">
+              {/* Back to the global board (analysis mode is deep-link only now). */}
+              <button
+                onClick={() => setMode("dashboard")}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm transition-colors hover:border-emerald-500/40 hover:text-foreground"
+              >
+                <LayoutDashboardIcon className="size-4" /> 返回看板
+              </button>
               <h2
                 className="min-w-0 truncate font-heading text-lg font-semibold tracking-tight"
                 title={currentAnalysisName || "未命名分析"}
@@ -1051,6 +1000,25 @@ export default function AnalysisPage() {
                 {currentAnalysisName || "未命名分析"}
               </h2>
               <div className="ml-auto flex items-center gap-2">
+                {/* Model selector: the LLM the workbench's assist features drive.
+                    Hidden until (and unless) the assist /meta call succeeds. */}
+                {models.length > 0 && (
+                  <select
+                    className={`${SELECT_BASE} py-1 text-xs`}
+                    value={modelId}
+                    title="选择 AI 模型"
+                    onChange={(e) => {
+                      setModelId(e.target.value)
+                      persistSelectedModel(e.target.value)
+                    }}
+                  >
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.display_name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {/* "我的分析" — open a saved analysis (two-click delete per item). */}
                 <div className="relative">
                   <button
@@ -2339,12 +2307,18 @@ function DashboardCanvas({
   metricCount,
   offline,
   onRefresh,
+  models,
+  modelId,
+  onModelChange,
 }: {
   data: { metric: Metric; total: MetricQueryResult | null; byDim: MetricQueryResult | null }[] | null
   loading: boolean
   metricCount: number
   offline: boolean
   onRefresh: () => void
+  models: ModelInfo[]
+  modelId: string
+  onModelChange: (id: string) => void
 }) {
   // AI 总结: a one-shot narrative over the whole board's already-masked
   // aggregates. Local state so a board refresh never disturbs the last summary.
@@ -2396,13 +2370,35 @@ function DashboardCanvas({
 
   return (
     <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card p-4">
-      {/* Global-overview note + AI 总结 + manual refresh (no auto-polling). */}
+      {/* Global-overview note + model selector + AI 总结 + manual refresh (no
+          auto-polling). The head-row model <select> is the LLM every assist
+          feature on this page drives. */}
       <div className="mb-3 flex items-center gap-2">
         <span className="text-xs text-muted-foreground">看板为全局概览，不受对象集与过滤影响</span>
+        {offline && (
+          <Badge variant="warning">
+            <WifiOffIcon /> 分析服务未启动
+          </Badge>
+        )}
+        {/* Model selector: hidden until (and unless) the assist /meta call succeeds. */}
+        {models.length > 0 && (
+          <select
+            className={`${SELECT_BASE} ml-auto py-1 text-xs`}
+            value={modelId}
+            title="选择 AI 模型"
+            onChange={(e) => onModelChange(e.target.value)}
+          >
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           onClick={runSummary}
           disabled={summaryBusy || loading}
-          className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+          className={`${models.length > 0 ? "" : "ml-auto "}inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50`}
         >
           {summaryBusy ? (
             <Loader2Icon className="size-3 animate-spin" />
