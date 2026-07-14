@@ -73,6 +73,41 @@ export type AiInterpretRequest = {
   question?: string | null
 }
 
+// One column offered to the AI analysis-config planner. Enough for it to pick
+// filter fields / a group-by / measures without ever seeing raw data.
+export type AiAnalyzeColumn = {
+  name: string
+  label: string
+  kind: string
+  data_type?: string | null
+}
+
+// Result of translating a natural-language analysis into a workbench config
+// (filters + group-by + measures). The frontend then applies it and runs the
+// query itself. `error` is a normal "no fit" outcome rendered inline, not an
+// HTTP failure.
+export type AiAnalyzeConfigResult = {
+  filters?: { field: string; op: string; value: string }[]
+  group_by?: string | null
+  group_by_label?: string | null
+  metrics?: { field: string; agg: string; label?: string }[]
+  reason?: string
+  error?: string
+}
+
+// One metric's already-masked summary sent to the AI board-summary endpoint:
+// the overall value plus an optional first-dimension breakdown. Assist only
+// narrates these numbers — it never fetches raw data.
+export type AiBoardMetricSummary = {
+  label: string
+  unit?: string | null
+  agg?: string | null
+  total?: number | null
+  matched_rows?: number | null
+  dimension_label?: string | null
+  rows?: { group: string; value: number | string }[]
+}
+
 // A selectable LLM the assist service can drive (from GET /meta).
 export type ModelInfo = {
   id: string
@@ -148,6 +183,31 @@ export const assistApi = {
     req<{ text: string }>("/ai/interpret", {
       method: "POST",
       body: JSON.stringify({ ...body, model }),
+    }),
+
+  // Translate a natural-language analysis into a workbench config (filters +
+  // group-by + measures) against the given object type's columns. The frontend
+  // applies the config and runs the query itself (carrying the user token).
+  aiAnalyzeConfig: (
+    body: {
+      question: string
+      table: string
+      table_label: string
+      columns: AiAnalyzeColumn[]
+    },
+    model = getSelectedModel()
+  ) =>
+    req<AiAnalyzeConfigResult>("/ai/analyze-config", {
+      method: "POST",
+      body: JSON.stringify({ ...body, model }),
+    }),
+
+  // Ask the assist service to narrate the whole metric board's already-masked
+  // summaries into one short briefing.
+  aiBoardSummary: (metrics: AiBoardMetricSummary[], model = getSelectedModel()) =>
+    req<{ text: string }>("/ai/board-summary", {
+      method: "POST",
+      body: JSON.stringify({ metrics, model }),
     }),
 
   // POSTs the user message and feeds parsed SSE events to the callback until

@@ -55,9 +55,14 @@ import {
 } from "@/lib/object-set"
 import {
   assistApi,
+  getSelectedModel,
+  setSelectedModel as persistSelectedModel,
   timeAgo,
+  type AiAnalyzeConfigResult,
+  type AiBoardMetricSummary,
   type AiInterpretRequest,
   type AiMetricQueryResult,
+  type ModelInfo,
 } from "@/lib/assist-api"
 import { fieldLabel } from "@/lib/field-labels"
 import { PageContainer, PageHeading } from "@/components/page-container"
@@ -123,11 +128,25 @@ function formatValue(v: number | string): string {
   return v >= 1000 ? v.toLocaleString() : String(v)
 }
 
+// Compact a large magnitude so 10~13-digit metric values (e.g. order sales like
+// 4,096,380,384) stay inside the fixed-width value columns instead of spilling
+// past the card edge: >=1e8 collapses to 「亿」 (2 decimals), >=1e6 to 「万」 (1
+// decimal), trailing zeros trimmed. Smaller values keep plain thousands grouping.
+function compactNumber(value: number): string {
+  const abs = Math.abs(value)
+  if (abs >= 1e8) return `${Number((value / 1e8).toFixed(2))}亿`
+  if (abs >= 1e6) return `${Number((value / 1e4).toFixed(1))}万`
+  return formatValue(value)
+}
+
 // Metric values honour their aggregation + unit: rate renders as a percentage,
-// currency gets a ¥ prefix, unit-of-count metrics append their unit.
-function formatMetricValue(value: number, agg: string, unit: string): string {
+// currency gets a ¥ prefix, unit-of-count metrics append their unit. Large
+// magnitudes are compacted (¥40.96亿, 1.4万) by default so they fit the fixed-
+// width value columns; pass compact=false for the full thousands-grouped form
+// (used for the exact-value tooltips on those columns).
+function formatMetricValue(value: number, agg: string, unit: string, compact = true): string {
   if (agg === "rate" || unit === "%") return `${value}%`
-  const s = formatValue(value)
+  const s = compact ? compactNumber(value) : formatValue(value)
   if (unit === "¥") return `¥${s}`
   if (unit === "单" || unit === "个") return `${s} ${unit}`
   return s
@@ -245,6 +264,11 @@ export default function AnalysisPage() {
   const [justSaved, setJustSaved] = React.useState(false)
   // Set when replaying a saved analysis stops early (link gone / set over limit).
   const [replayError, setReplayError] = React.useState<string | null>(null)
+  // Model selector (top bar): the LLM every assist call on this page uses. Loaded
+  // from assist /meta; the selector stays hidden if that fails. Persisted
+  // per-browser via persistSelectedModel so the choice carries to the AIP 助手.
+  const [models, setModels] = React.useState<ModelInfo[]>([])
+  const [modelId, setModelId] = React.useState<string>("")
 
   const table = tables.find((t) => t.name === tableName) ?? null
   const dimensions = table?.columns.filter((c) => c.kind === "dimension" && c.name !== "id") ?? []
@@ -354,6 +378,20 @@ export default function AnalysisPage() {
       })
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Load the assist model catalog for the top-bar selector. Default to the
+  // per-browser choice when it is still offered, else the service default. A
+  // failure (assist offline) just leaves the selector hidden.
+  React.useEffect(() => {
+    assistApi
+      .meta()
+      .then((m) => {
+        setModels(m.models)
+        const stored = getSelectedModel()
+        setModelId(stored && m.models.some((x) => x.id === stored) ? stored : m.default)
+      })
+      .catch(() => setModels([]))
   }, [])
 
   function selectTable(t: AnalysisTable) {
@@ -920,6 +958,26 @@ export default function AnalysisPage() {
         icon={<RadarIcon />}
         actions={
           <div className="flex items-center gap-2">
+            {/* Model selector: the LLM every assist feature on this page drives.
+                Hidden until (and unless) the assist /meta call succeeds. */}
+            {models.length > 0 && (
+              <select
+                className={`${SELECT_BASE} py-1 text-xs`}
+                value={modelId}
+                title="选择 AI 模型"
+                onChange={(e) => {
+                  setModelId(e.target.value)
+                  persistSelectedModel(e.target.value)
+                }}
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {/* Top-level mode switch: 看板 (global board) vs 分析 (step-board document).
                 The save / open controls live inside the analysis document head. */}
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
@@ -1102,6 +1160,25 @@ export default function AnalysisPage() {
                 </div>
               </div>
             </div>
+
+            {/* AI 问数: describe an analysis in natural language; the assist
+                service maps it onto the current object type's columns, and the
+                config is applied straight to the boards below. */}
+            <WorkbenchAskCard
+              table={table}
+              onApply={(res) => {
+                setFilters(
+                  (res.filters ?? []).map((f) => ({
+                    field: f.field,
+                    op: f.op as FilterOp,
+                    value: f.value,
+                  }))
+                )
+                setGroupBy(res.group_by ?? "")
+                setMetrics((res.metrics ?? []).map((m) => ({ field: m.field, agg: m.agg as MetricAgg })))
+                setLens("table")
+              }}
+            />
 
             {/* The step spine: each board carries a step icon linked to the next by
                 a vertical connector line. The board order is the analysis path. */}
@@ -1457,21 +1534,49 @@ export default function AnalysisPage() {
                     ))}
 
                   {lens === "timeline" && (
-                    <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-                      {timeCol ? (
-                        <TimelineView
-                          rows={timelineRows}
-                          columns={table?.columns ?? []}
-                          timeCol={timeCol}
-                        />
-                      ) : null}
-                    </div>
+                    <>
+                      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
+                        {timeCol ? (
+                          <TimelineView
+                            rows={timelineRows}
+                            columns={table?.columns ?? []}
+                            timeCol={timeCol}
+                          />
+                        ) : null}
+                      </div>
+                      {/* AI 解读: bucket the fetched slice client-side and narrate it. */}
+                      {timelineRows.length > 0 && timeCol && (
+                        <div className="mt-2 shrink-0">
+                          <TimelineInterpret
+                            rows={timelineRows}
+                            timeColName={timeCol.name}
+                            tableLabel={table?.label ?? ""}
+                            matchedRows={result?.matched_rows ?? null}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {lens === "map" && (
-                    <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
-                      {geoCol ? <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} /> : null}
-                    </div>
+                    <>
+                      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
+                        {geoCol ? (
+                          <MapView counts={geoCounts} geoCol={geoCol} onDrill={drillGeo} />
+                        ) : null}
+                      </div>
+                      {/* AI 解读: narrate the per-geo counts (server-side aggregate). */}
+                      {geoCounts.length > 0 && (
+                        <div className="mt-2 shrink-0">
+                          <GeoInterpret
+                            counts={geoCounts}
+                            tableLabel={table?.label ?? ""}
+                            geoLabel={geoCol?.label ?? "地区"}
+                            matchedRows={result?.matched_rows ?? null}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </StepBoard>
@@ -1755,7 +1860,10 @@ function MetricBarList({
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <div className="w-20 shrink-0 text-right text-sm font-medium tabular-nums">
+            <div
+              className="w-20 shrink-0 whitespace-nowrap text-right text-sm font-medium tabular-nums"
+              title={formatMetricValue(r.value, agg, unit, false)}
+            >
               {formatMetricValue(r.value, agg, unit)}
             </div>
           </div>
@@ -1820,6 +1928,14 @@ function InterpretBlock({ payload }: { payload: AiInterpretRequest }) {
   )
 }
 
+// Starter questions for the dashboard AI 问数 — each maps onto a real metric and
+// dimension, so clicking one runs an actual query rather than showing a "no fit".
+const AI_ASK_EXAMPLES = [
+  "各类别的客服工单数量",
+  "各状态的订单销售额",
+  "各故障类别的维保工单数",
+]
+
 // AI 问数: ask a natural-language question; the assist service picks the metric
 // (+ optional dimension / filters), and this component executes the query
 // itself via analysisApi (carrying the user's token, so governance masking /
@@ -1836,14 +1952,15 @@ function AiAskCard() {
     data: MetricQueryResult
   } | null>(null)
 
-  async function ask() {
-    const q = question.trim()
-    if (!q || busy) return
+  // Shared entry point for the button, Enter key, and example chips.
+  async function ask(q: string) {
+    const trimmed = q.trim()
+    if (!trimmed || busy) return
     setBusy(true)
     setError(null)
     setNote(null)
     try {
-      const res = await assistApi.aiMetricQuery(q)
+      const res = await assistApi.aiMetricQuery(trimmed)
       if (res.error) {
         setNote(res.error)
         setResult(null)
@@ -1880,13 +1997,33 @@ function AiAskCard() {
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) ask()
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) ask(question)
           }}
         />
-        <Button size="sm" disabled={busy || question.trim() === ""} onClick={() => ask()}>
+        <Button size="sm" disabled={busy || question.trim() === ""} onClick={() => ask(question)}>
           {busy ? <Loader2Icon className="animate-spin" /> : <SparklesIcon />}
           提问
         </Button>
+      </div>
+
+      {/* Clickable examples — all backed by real metrics + dimensions, so a click
+          fills the input and runs the query straight away. */}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">试试：</span>
+        {AI_ASK_EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setQuestion(ex)
+              ask(ex)
+            }}
+            className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-emerald-500/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          >
+            {ex}
+          </button>
+        ))}
       </div>
 
       {note && <div className="mt-2 text-sm text-muted-foreground">{note}</div>}
@@ -1957,6 +2094,241 @@ function AiAskCard() {
   )
 }
 
+// Compact chips summarizing the config the AI applied to the workbench (e.g.
+// 过滤 1 项 · 按优先级 · 计数). An empty metric list means detail mode.
+function summarizeConfig(cfg: AiAnalyzeConfigResult): string[] {
+  const chips: string[] = []
+  const filters = cfg.filters ?? []
+  if (filters.length > 0) chips.push(`过滤 ${filters.length} 项`)
+  if (cfg.group_by) chips.push(`按${cfg.group_by_label ?? cfg.group_by}`)
+  const metrics = cfg.metrics ?? []
+  if (metrics.length === 0) {
+    chips.push("明细模式")
+  } else {
+    for (const m of metrics) {
+      const agg = AGG_OPTIONS.find((o) => o.value === (m.agg as MetricAgg))?.label ?? m.agg
+      chips.push(m.label ? `${m.label} · ${agg}` : agg)
+    }
+  }
+  return chips
+}
+
+// AI 问数 for the analysis workbench: describe an analysis in natural language;
+// the assist service maps it onto the current object type's columns as a
+// filters / group-by / measures config, which the page applies to the boards.
+// Mirrors AiAskCard's compact card, but drives the step-board config rather than
+// running a cube-metric query. Disabled until an object type is selected.
+function WorkbenchAskCard({
+  table,
+  onApply,
+}: {
+  table: AnalysisTable | null
+  onApply: (cfg: AiAnalyzeConfigResult) => void
+}) {
+  const [question, setQuestion] = React.useState("")
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  // The model's "no fit" outcome — a normal result shown as a muted note.
+  const [note, setNote] = React.useState<string | null>(null)
+  // A short summary of the applied config (chips + optional 口径 reason).
+  const [applied, setApplied] = React.useState<{ reason?: string; chips: string[] } | null>(null)
+
+  // Examples derived from the current object type's own columns, so every chip
+  // is relevant to whatever is selected (empty when no table is chosen).
+  const examples = React.useMemo<string[]>(() => {
+    if (!table) return []
+    const dims = table.columns.filter((c) => c.kind === "dimension" && c.name !== "id").slice(0, 2)
+    const measure = table.columns.find((c) => c.kind === "measure") ?? null
+    const out: string[] = []
+    if (dims[0]) out.push(`各${dims[0].label}的记录数`)
+    if (dims[0] && measure) out.push(`各${dims[0].label}的${measure.label}汇总`)
+    else if (dims[1]) out.push(`各${dims[1].label}的记录数`)
+    if (dims[1] && measure) out.push(`各${dims[1].label}的${measure.label}汇总`)
+    return Array.from(new Set(out.filter(Boolean))).slice(0, 3)
+  }, [table])
+
+  // Shared entry point for the button, Enter key, and example chips.
+  async function ask(q: string) {
+    const trimmed = q.trim()
+    if (!trimmed || busy || !table) return
+    setBusy(true)
+    setError(null)
+    setNote(null)
+    try {
+      const res = await assistApi.aiAnalyzeConfig({
+        question: trimmed,
+        table: table.name,
+        table_label: table.label,
+        columns: table.columns.map((c) => ({
+          name: c.name,
+          label: c.label,
+          kind: c.kind,
+          data_type: c.data_type,
+        })),
+      })
+      if (res.error) {
+        setNote(res.error)
+        setApplied(null)
+        return
+      }
+      onApply(res)
+      setApplied({ reason: res.reason, chips: summarizeConfig(res) })
+    } catch {
+      setError("AI 问数失败，请稍后再试")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mb-6 rounded-lg border border-border bg-background/40 p-3">
+      <div className="mb-2 flex items-center gap-1.5">
+        <SparklesIcon className="size-4 text-emerald-500" />
+        <span className="text-xs text-muted-foreground">AI 问数</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          className="h-8"
+          placeholder="用自然语言描述分析，或点击下方示例"
+          value={question}
+          disabled={!table}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) ask(question)
+          }}
+        />
+        <Button size="sm" disabled={busy || !table || question.trim() === ""} onClick={() => ask(question)}>
+          {busy ? <Loader2Icon className="animate-spin" /> : <SparklesIcon />}
+          提问
+        </Button>
+      </div>
+
+      {/* Examples built from the selected object type's columns — click to fill
+          and submit. Hidden entirely until a table is chosen. */}
+      {examples.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">试试：</span>
+          {examples.map((ex) => (
+            <button
+              key={ex}
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setQuestion(ex)
+                ask(ex)
+              }}
+              className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-emerald-500/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {note && <div className="mt-2 text-sm text-muted-foreground">{note}</div>}
+      {error && (
+        <div className="mt-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
+
+      {applied && (
+        <div className="mt-2 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {applied.chips.map((c, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400"
+              >
+                {c}
+              </span>
+            ))}
+          </div>
+          {applied.reason && (
+            <div className="text-xs text-muted-foreground">「口径」{applied.reason}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// AI 解读 for the timeline lens: bucket the fetched newest-first slice by day
+// client-side (or by month when there are too many day buckets for a readable
+// summary), then narrate the counts via the shared InterpretBlock.
+function TimelineInterpret({
+  rows,
+  timeColName,
+  tableLabel,
+  matchedRows,
+}: {
+  rows: Record<string, unknown>[]
+  timeColName: string
+  tableLabel: string
+  matchedRows: number | null
+}) {
+  const buckets = React.useMemo(() => {
+    const bucketBy = (len: number) => {
+      const counts = new Map<string, number>()
+      for (const row of rows) {
+        const key = String(row[timeColName] ?? "").slice(0, len)
+        if (!key) continue
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+      return counts
+    }
+    // Day buckets first; if there are more than 24 of them, re-bucket by month.
+    const byDay = bucketBy(10)
+    const source = byDay.size > 24 ? bucketBy(7) : byDay
+    return Array.from(source.entries())
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .map(([group, value]) => ({ group, value }))
+  }, [rows, timeColName])
+
+  if (buckets.length === 0) return null
+  return (
+    <InterpretBlock
+      payload={{
+        title: `${tableLabel} · 按时间分布（最近 ${rows.length} 条）`,
+        unit: "条",
+        agg: "count",
+        total: rows.length,
+        matched_rows: matchedRows,
+        rows: buckets,
+      }}
+    />
+  )
+}
+
+// AI 解读 for the map lens: narrate the top geo buckets (already a server-side
+// count aggregate) as an ordinary aggregate payload.
+function GeoInterpret({
+  counts,
+  tableLabel,
+  geoLabel,
+  matchedRows,
+}: {
+  counts: { value: string; count: number }[]
+  tableLabel: string
+  geoLabel: string
+  matchedRows: number | null
+}) {
+  const rows = counts.slice(0, 20).map((g) => ({ group: g.value, value: g.count }))
+  const total = counts.reduce((s, g) => s + g.count, 0)
+  return (
+    <InterpretBlock
+      payload={{
+        title: `${tableLabel} · 按${geoLabel}分布`,
+        unit: "条",
+        agg: "count",
+        total,
+        matched_rows: matchedRows,
+        rows,
+      }}
+    />
+  )
+}
+
 // --- Dashboard lens canvas: a platform-wide overview generated from the metric
 // catalog — stat cards for every metric plus a bar-chart panel per dimensioned
 // metric. No hardcoded scenario content: it re-derives from `data` entirely. ---
@@ -1974,6 +2346,35 @@ function DashboardCanvas({
   offline: boolean
   onRefresh: () => void
 }) {
+  // AI 总结: a one-shot narrative over the whole board's already-masked
+  // aggregates. Local state so a board refresh never disturbs the last summary.
+  const [summaryBusy, setSummaryBusy] = React.useState(false)
+  const [summaryText, setSummaryText] = React.useState<string | null>(null)
+  const [summaryError, setSummaryError] = React.useState<string | null>(null)
+
+  async function runSummary() {
+    if (summaryBusy || !data) return
+    setSummaryBusy(true)
+    setSummaryError(null)
+    try {
+      const payload: AiBoardMetricSummary[] = data.map((d) => ({
+        label: d.metric.label,
+        unit: d.total?.unit ?? d.metric.unit,
+        agg: d.total?.agg ?? d.metric.agg,
+        total: d.total?.total ?? null,
+        matched_rows: d.total?.matched_rows ?? null,
+        dimension_label: d.byDim?.dimension_label ?? null,
+        rows: (d.byDim?.rows ?? []).slice(0, 8),
+      }))
+      const res = await assistApi.aiBoardSummary(payload)
+      setSummaryText(res.text)
+    } catch {
+      setSummaryError("AI 总结失败，请重试")
+    } finally {
+      setSummaryBusy(false)
+    }
+  }
+
   // First load (no cached board yet): a centered spinner, or an offline / empty
   // notice when there is nothing to build from.
   if (!data) {
@@ -1995,17 +2396,49 @@ function DashboardCanvas({
 
   return (
     <div className="relative min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-card p-4">
-      {/* Global-overview note + manual refresh (no auto-polling). */}
+      {/* Global-overview note + AI 总结 + manual refresh (no auto-polling). */}
       <div className="mb-3 flex items-center gap-2">
         <span className="text-xs text-muted-foreground">看板为全局概览，不受对象集与过滤影响</span>
         <button
+          onClick={runSummary}
+          disabled={summaryBusy || loading}
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+        >
+          {summaryBusy ? (
+            <Loader2Icon className="size-3 animate-spin" />
+          ) : (
+            <SparklesIcon className="size-3 text-emerald-500" />
+          )}
+          AI 总结
+        </button>
+        <button
           onClick={onRefresh}
           disabled={loading}
-          className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:border-emerald-500/40 hover:text-foreground disabled:opacity-50"
         >
           <RefreshCwIcon className={`size-3 ${loading ? "animate-spin" : ""}`} /> 刷新
         </button>
       </div>
+
+      {/* AI 总结 briefing — a dismissible panel between the head and AI 问数. */}
+      {summaryError && (
+        <div className="mb-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {summaryError}
+        </div>
+      )}
+      {summaryText && (
+        <div className="mb-3 flex items-start gap-2 rounded-md border-l-2 border-emerald-500/60 bg-muted/30 px-3 py-2 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          <SparklesIcon className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+          <span className="min-w-0 flex-1">{summaryText}</span>
+          <button
+            onClick={() => setSummaryText(null)}
+            className="shrink-0 rounded p-0.5 hover:text-foreground"
+            aria-label="关闭总结"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* AI 问数 sits outside the dimming wrapper so a board refresh never dims
           the last answer, and its local state survives refreshes. */}
@@ -2147,12 +2580,29 @@ function ChartCanvas({
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <div className="w-24 shrink-0 text-right text-sm font-medium tabular-nums">
+                <div
+                  className="w-24 shrink-0 whitespace-nowrap text-right text-sm font-medium tabular-nums"
+                  title={formatMetricValue(r.value, metricResult.agg, metricResult.unit, false)}
+                >
                   {formatMetricValue(r.value, metricResult.agg, metricResult.unit)}
                 </div>
               </div>
             )
           })}
+          {/* AI 解读: narrate this chart lens's authoritative (already-masked)
+              aggregate rows, using the model selected in the AIP 助手. */}
+          <div className="mt-3">
+            <InterpretBlock
+              payload={{
+                title: `${metricResult.metric_label}${metricResult.dimension_label ? ` · 按${metricResult.dimension_label}` : " · 整体"}`,
+                unit: metricResult.unit,
+                agg: metricResult.agg,
+                total: metricResult.total ?? null,
+                matched_rows: metricResult.matched_rows ?? null,
+                rows: metricResult.rows,
+              }}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -2188,7 +2638,15 @@ function PivotChartCanvas({
           当前配置无数据
         </div>
       ) : (
-        <MetricBarChart title={title} unit="" agg="" rows={rows} />
+        <>
+          <MetricBarChart title={title} unit="" agg="" rows={rows} />
+          {/* AI 解读: narrate the pivot aggregate the user just built. */}
+          <div className="mt-3">
+            <InterpretBlock
+              payload={{ title, unit: null, agg: null, total: null, matched_rows: null, rows }}
+            />
+          </div>
+        </>
       )}
     </div>
   )

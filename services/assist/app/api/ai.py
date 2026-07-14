@@ -243,3 +243,194 @@ def interpret(body: InterpretBody) -> dict:
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(status_code=502, detail="AI 未能生成解读，请重试")
     return {"text": text.strip()}
+
+
+# --- Endpoint 3: NL → analysis-workbench query config -------------------------
+
+_ANALYZE_CONFIG_SYSTEM = """你是数据分析工作台的「查询配置生成器」。给定对象类型的字段清单（JSON）与用户问题，你只输出配置、绝不执行查询。严格只输出 JSON，不要任何多余文字、不要 markdown：
+{"filters": [{"field": "<字段名>", "op": "<eq|neq|gt|lt|contains>", "value": "<取值>"}], "group_by": "<字段名或 null>", "metrics": [{"field": "<字段名>", "agg": "<sum|avg|count|max|min>"}], "reason": "<一句话中文说明>"}
+或当该问题无法配置时：
+{"error": "<一句话中文说明为什么该问题无法配置>"}
+
+规则：
+- op 只允许 eq/neq/gt/lt/contains；仅当问题**明确限定条件**（如「状态=已完成」「金额大于 100」）时才输出 filters，否则 filters 为空数组。
+- group_by 必须是 kind=dimension 的字段；整体汇总或明细查看时为 null。
+- metrics 的 agg ∈ sum/avg/count/max/min；sum/avg/max/min 只能用于 kind=measure 的字段；count 可用任意字段（惯例用 "id"）。
+- 「查看 / 列出明细」类问题 → metrics 为空数组且 group_by 为 null（明细模式）。
+- 「各 X 的 Y / 排名 / 分布」类问题 → group_by=X 对应字段 + metrics。
+
+示例一（分组统计）：
+字段清单 {"table": "订单", "columns": [{"name": "region", "label": "地区", "kind": "dimension", "data_type": "string"}, {"name": "amount", "label": "金额", "kind": "measure", "data_type": "number"}], ...}
+问题「各地区的销售总额」→ {"filters": [], "group_by": "region", "metrics": [{"field": "amount", "agg": "sum"}], "reason": "按地区分组汇总金额"}
+
+示例二（带过滤的明细）：
+字段清单 {"table": "订单", "columns": [{"name": "status", "label": "状态", "kind": "dimension", "data_type": "string"}, {"name": "amount", "label": "金额", "kind": "measure", "data_type": "number"}], ...}
+问题「列出已完成的订单明细」→ {"filters": [{"field": "status", "op": "eq", "value": "已完成"}], "group_by": null, "metrics": [], "reason": "筛选已完成状态并查看明细"}
+"""
+
+_FILTER_OPS = {"eq", "neq", "gt", "lt", "contains"}
+_METRIC_AGGS = {"sum", "avg", "count", "max", "min"}
+
+
+class ColumnSpec(BaseModel):
+    name: str
+    label: str
+    kind: str  # "dimension" | "measure"
+    data_type: str | None = None
+
+
+class AnalyzeConfigBody(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+    # Object-type api_name; echoed back only, never used to fetch anything.
+    table: str
+    table_label: str
+    # The frontend supplies the field list (same "frontend-provides-data" posture
+    # as /ai/interpret); cap the whole table at 120 columns.
+    columns: list[ColumnSpec] = Field(max_length=120)
+    # Optional: which selectable model to use; None → the service default.
+    model: str | None = None
+
+
+@router.post("/ai/analyze-config")
+def analyze_config(body: AnalyzeConfigBody) -> dict:
+    # Assist only translates — it never queries another service. The frontend
+    # ships the current object type's field list, and the LLM maps the question
+    # onto a filter / group-by / metric config against those fields.
+    payload = json.dumps(
+        {
+            "table": body.table_label,
+            "columns": [
+                {
+                    "name": c.name,
+                    "label": c.label,
+                    "kind": c.kind,
+                    "data_type": c.data_type,
+                }
+                for c in body.columns
+            ],
+            "question": body.question,
+        },
+        ensure_ascii=False,
+    )
+    data = _invoke_json(_ANALYZE_CONFIG_SYSTEM, payload, body.model)
+
+    # The model may legitimately decide the question can't be configured — a
+    # normal outcome the frontend renders inline, so pass it through with a 200.
+    if data.get("error"):
+        return {"error": str(data["error"])}
+
+    # --- Server-side validation: the model's output is untrusted, so filter
+    # every field item-by-item rather than erroring out. ---
+    by_name = {c.name: c for c in body.columns}
+
+    # Keep only well-formed {field, op, value} entries; cap at 4.
+    filters: list[dict[str, str]] = []
+    raw_filters = data.get("filters")
+    if isinstance(raw_filters, list):
+        for f in raw_filters:
+            if not isinstance(f, dict):
+                continue
+            field = f.get("field")
+            op = f.get("op")
+            value = f.get("value")
+            if (
+                field in by_name
+                and op in _FILTER_OPS
+                and isinstance(value, str)
+                and value
+            ):
+                filters.append({"field": field, "op": op, "value": value})
+            if len(filters) >= 4:
+                break
+
+    # group_by must be one of this object type's dimension fields.
+    group_by = data.get("group_by")
+    if group_by not in by_name or by_name[group_by].kind != "dimension":
+        group_by = None
+
+    # Keep only well-formed {field, agg} metrics; sum/avg/max/min require a
+    # measure field, count may target any field. Cap at 3.
+    metrics: list[dict[str, str]] = []
+    raw_metrics = data.get("metrics")
+    if isinstance(raw_metrics, list):
+        for m in raw_metrics:
+            if not isinstance(m, dict):
+                continue
+            field = m.get("field")
+            agg = m.get("agg")
+            if field not in by_name or agg not in _METRIC_AGGS:
+                continue
+            if agg != "count" and by_name[field].kind != "measure":
+                continue
+            metrics.append(
+                {"field": field, "agg": agg, "label": by_name[field].label}
+            )
+            if len(metrics) >= 3:
+                break
+
+    return {
+        "filters": filters,
+        "group_by": group_by,
+        "group_by_label": by_name[group_by].label if group_by else None,
+        "metrics": metrics,
+        "reason": data.get("reason"),
+    }
+
+
+# --- Endpoint 4: whole-board metrics → Chinese briefing -----------------------
+
+_BOARD_SUMMARY_SYSTEM = """你是数据平台的「看板简报生成器」。给定的所有数值均由指标引擎计算，是**权威的、不可重算或臆造的**。
+
+请输出 200~300 字的中文简报：
+① 以一句总体结论开头；
+② 给出 2~4 个要点（亮点与风险，必须引用给定的具体数值 / 占比，占比只能基于给定 rows 做简单百分比推算）；
+③ 最后给出一条可执行建议。
+任何值为字符串 "***" 表示该项因权限被脱敏，如实说明、不得猜测其数值。
+
+只输出纯文本，不要 markdown 标题、不要列表符号。以 JSON 返回：{"text": "<简报>"}
+"""
+
+
+class BoardMetric(BaseModel):
+    label: str
+    unit: str | None = None
+    agg: str | None = None
+    total: float | None = None
+    matched_rows: int | None = None
+    dimension_label: str | None = None
+    rows: list[InterpretRow] = Field(default_factory=list)
+
+
+class BoardSummaryBody(BaseModel):
+    metrics: list[BoardMetric] = Field(max_length=12)
+    # Optional: which selectable model to use; None → the service default.
+    model: str | None = None
+
+
+@router.post("/ai/board-summary")
+def board_summary(body: BoardSummaryBody) -> dict:
+    payload = json.dumps(
+        {
+            "metrics": [
+                {
+                    "label": m.label,
+                    "unit": m.unit,
+                    "agg": m.agg,
+                    "total": m.total,
+                    "matched_rows": m.matched_rows,
+                    "dimension_label": m.dimension_label,
+                    # Cap defensively; the frontend already sends a small slice.
+                    "rows": [
+                        {"group": r.group, "value": r.value} for r in m.rows[:10]
+                    ],
+                }
+                for m in body.metrics
+            ],
+        },
+        ensure_ascii=False,
+    )
+    data = _invoke_json(_BOARD_SUMMARY_SYSTEM, payload, body.model)
+    text = data.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(status_code=502, detail="AI 未能生成简报，请重试")
+    return {"text": text.strip()}

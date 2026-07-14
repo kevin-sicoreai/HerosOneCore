@@ -7,24 +7,54 @@ import {
   BoxesIcon,
   ChevronRightIcon,
   ClockIcon,
+  CpuIcon,
   DatabaseIcon,
+  FileTextIcon,
   FolderIcon,
+  Loader2Icon,
   PlugIcon,
+  SearchIcon,
   Share2Icon,
   SparklesIcon,
   WorkflowIcon,
+  ZapIcon,
 } from "lucide-react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 import { dataApi } from "@/lib/data-api"
 import { ontologyApi } from "@/lib/ontology-api"
 import { pipelineApi } from "@/lib/pipeline-api"
+import {
+  assistApi,
+  type ChartPayload,
+  type TraceIcon,
+  type TraceStep,
+} from "@/lib/assist-api"
 import { findApp } from "@/lib/apps"
 import { readRecent, type RecentEntry } from "@/lib/recent"
+import { MetricBarChart } from "@/components/metric-bar-chart"
 import { useResourceDrawer } from "@/components/resource-detail-drawer"
 import { PageContainer, PageHeading } from "@/components/page-container"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+
+// Mirrors the AIP 助手 page's SUGGESTIONS so a click here starts the same
+// canned business question, just answered inline instead of on /assist.
+const AIP_SUGGESTIONS = [
+  "客服工单反映出哪些服务短板？该优先改进什么？",
+  "订单履约是否健康？哪些状态存在积压或流失风险？",
+  "设备与维保的运营压力集中在哪里？该重点治理什么？",
+]
+
+// Same trace-step icon mapping as the assist page; falls back to Sparkles.
+const TRACE_ICON: Record<TraceIcon, React.ElementType> = {
+  search: SearchIcon,
+  compute: ZapIcon,
+  cite: FileTextIcon,
+  model: CpuIcon,
+}
 
 type Kind = "folder" | "dataset" | "object-type" | "pipeline"
 type Node = { id: string; name: string; kind: Kind; owner?: string; children?: Node[] }
@@ -150,32 +180,177 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        <Card className="border-primary/25 bg-primary/[0.035]">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <SparklesIcon className="size-4 text-primary" /> AIP 建议
-            </CardTitle>
-            <CardDescription>基于当前资产，助手推荐的下一步操作</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2.5">
-            {[
-              "点开任意资源，查看其血缘、权限与审计",
-              "在本体管理器中把数据集建成对象类型并连接关系",
-              "在管道构建中新建转换，产出分析所需的宽表",
-            ].map((t, i) => (
-              <Link
-                key={i}
-                href="/assist"
-                className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 text-sm transition-colors hover:border-primary/40 hover:bg-accent"
-              >
-                <BlocksIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                <span className="leading-relaxed">{t}</span>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
+        <AipSuggestCard />
       </div>
     </PageContainer>
+  )
+}
+
+// Right-rail "AIP 建议" card. Each suggestion runs the real assist pipeline
+// in place: click a question → stream trace + answer + metric charts right
+// inside the card, reusing one lazily-created session for the page visit.
+// Keeps the assist page's onEvent handling so behaviour stays in lockstep.
+function AipSuggestCard() {
+  // Session is created on first click and reused for every later question.
+  const [sessionId, setSessionId] = React.useState<string | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  const [activeQuestion, setActiveQuestion] = React.useState<string | null>(null)
+  const [trace, setTrace] = React.useState<TraceStep[]>([])
+  const [answer, setAnswer] = React.useState("")
+  const [charts, setCharts] = React.useState<ChartPayload[]>([])
+  const [error, setError] = React.useState<string | null>(null)
+
+  async function ask(question: string) {
+    if (busy) return
+    setActiveQuestion(question)
+    setTrace([])
+    setAnswer("")
+    setCharts([])
+    setError(null)
+    setBusy(true)
+    try {
+      let sid = sessionId
+      if (!sid) {
+        const s = await assistApi.createSession()
+        setSessionId(s.id)
+        sid = s.id
+      }
+      // Model omitted so chatStream defaults to getSelectedModel().
+      await assistApi.chatStream(sid, question, (ev) => {
+        if (ev.type === "step_start") {
+          const { type: _t, ...step } = ev
+          setTrace((prev) => [...prev, step as TraceStep])
+        } else if (ev.type === "step_end") {
+          setTrace((prev) =>
+            prev.map((s) => (s.id === ev.id ? { ...s, meta: ev.meta, status: "done" } : s))
+          )
+        } else if (ev.type === "token") {
+          setAnswer((prev) => prev + ev.text)
+        } else if (ev.type === "chart") {
+          const { type: _t, ...chart } = ev
+          setCharts((prev) => [...prev, chart as ChartPayload])
+        } else if (ev.type === "error") {
+          setError(ev.message)
+        } else if (ev.type === "done") {
+          setBusy(false)
+        }
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "请求失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Back to the initial three-suggestion state.
+  function reset() {
+    if (busy) return
+    setActiveQuestion(null)
+    setTrace([])
+    setAnswer("")
+    setCharts([])
+    setError(null)
+  }
+
+  const hasResult = activeQuestion !== null || busy
+
+  return (
+    <Card className="border-primary/25 bg-primary/[0.035]">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <SparklesIcon className="size-4 text-primary" /> AIP 建议
+        </CardTitle>
+        <CardDescription>点击问题，就地生成分析</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2.5">
+        {/* Suggested questions — click to answer inline; all disabled while busy. */}
+        {AIP_SUGGESTIONS.map((qn) => (
+          <button
+            key={qn}
+            type="button"
+            onClick={() => ask(qn)}
+            disabled={busy}
+            className="flex w-full items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/40 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <BlocksIcon className="mt-0.5 size-3.5 shrink-0 text-primary" />
+            <span className="leading-relaxed">{qn}</span>
+          </button>
+        ))}
+
+        {/* Inline result: current question + trace + streamed answer + charts. */}
+        {hasResult && (
+          <div className="max-h-[420px] space-y-3 overflow-auto pt-1">
+            {activeQuestion && (
+              <div className="text-xs font-medium text-muted-foreground">{activeQuestion}</div>
+            )}
+
+            {/* Compact reasoning trace. */}
+            {trace.length > 0 && (
+              <ol className="space-y-1.5 rounded-lg border border-border bg-card p-2.5">
+                {trace.map((t) => {
+                  const Icon = TRACE_ICON[t.icon] ?? SparklesIcon
+                  return (
+                    <li key={t.id} className="flex items-center gap-2 text-xs">
+                      <Icon className="size-3.5 shrink-0 text-primary" />
+                      <span className="flex-1 leading-relaxed">{t.text}</span>
+                      <span className="text-muted-foreground">{t.meta}</span>
+                      {t.status === "done" ? (
+                        <span className="text-emerald-500">✓</span>
+                      ) : (
+                        <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />
+                      )}
+                    </li>
+                  )
+                })}
+              </ol>
+            )}
+
+            {/* Streamed answer, with a blinking cursor while tokens arrive. */}
+            {(answer || busy) && (
+              <div className="markdown-answer text-sm">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>
+                {busy && (
+                  <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-emerald-500 align-text-bottom" />
+                )}
+              </div>
+            )}
+
+            {error && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs text-red-500">
+                请求出错：{error}
+              </div>
+            )}
+
+            {/* Charts revealed only once the answer completes (as on assist). */}
+            {!busy && charts.length > 0 && (
+              <div className="space-y-2">
+                {charts.map((c, i) => (
+                  <div key={i} className="rounded-lg border border-border bg-card p-3">
+                    <MetricBarChart {...c} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Footer actions once the run finishes. */}
+            {!busy && (answer || error) && (
+              <div className="flex items-center justify-between border-t border-border pt-2.5 text-xs">
+                <Link href="/assist" className="text-primary hover:underline">
+                  在 AIP 助手中继续 →
+                </Link>
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  清空
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
