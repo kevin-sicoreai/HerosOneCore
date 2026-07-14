@@ -90,6 +90,49 @@ type RelRow = { pk: string; label: string; row: Record<string, unknown> }
 // `chainText` is the human-readable trail shown as a chip.
 type DerivedSet = { targetTypeId: string; inFilter: FilterSpec; chainText: string }
 
+// Name-ish keys tried in order when building a human-readable object label —
+// what a person would actually call the row.
+const LABEL_NAME_KEYS = ["name", "title", "full_name", "contact_name", "author", "plate_no", "company"]
+// Longest salient value kept before the primary key; the rest is elided.
+const LABEL_MAX_SALIENT = 20
+
+// Build a human-readable label for an object row so a drilled-into object reads
+// as real data rather than a bare primary key. Picks one salient attribute — a
+// name-ish value first, then a business document number (`*_no` / `code`) — and
+// pairs it with the pk (`salient · pk`). Falls back to the pk alone when the row
+// carries no salient value.
+function objectLabel(row: Record<string, unknown>, pk: string): string {
+  const nonEmpty = (v: unknown): string | null =>
+    typeof v === "string" && v.trim() !== "" ? v : null
+  let salient: string | null = null
+  // First choice: a name-ish key.
+  for (const k of LABEL_NAME_KEYS) {
+    const v = nonEmpty(row[k])
+    if (v) {
+      salient = v
+      break
+    }
+  }
+  // Second choice: a business document number (any `*_no` key, or `code`).
+  if (!salient) {
+    for (const k of Object.keys(row)) {
+      if (k.endsWith("_no") || k === "code") {
+        const v = nonEmpty(row[k])
+        if (v) {
+          salient = v
+          break
+        }
+      }
+    }
+  }
+  if (salient && salient !== pk) {
+    const trimmed =
+      salient.length > LABEL_MAX_SALIENT ? `${salient.slice(0, LABEL_MAX_SALIENT)}…` : salient
+    return `${trimmed} · ${pk}`
+  }
+  return pk
+}
+
 export default function ExplorerPage() {
   const { open } = useResourceDrawer()
   const [graph, setGraph] = React.useState<OntologyGraph>({ nodes: [], links: [] })
@@ -437,8 +480,6 @@ function InstanceList({
       cancelled = true
     }
   }, [focus.id, focus.api_name, derived])
-
-  const labelOf = (r: Record<string, unknown>) => (r["name"] ? String(r["name"]) : String(r[pkCol]))
 
   // Derive facets from the loaded rows: string columns whose distinct-value count
   // falls in the facet window (excludes the primary key and high-cardinality cols).
@@ -1067,7 +1108,7 @@ function InstanceList({
                               onPick({
                                 otId: focus.id,
                                 pk: String(r[pkCol]),
-                                label: labelOf(r),
+                                label: objectLabel(r, String(r[pkCol])),
                                 typeName: focus.display_name,
                                 color: focus.color,
                                 row: r,
@@ -1214,7 +1255,7 @@ function ObjectView({
             <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <button
               onClick={() => onTruncate(i)}
-              className={`max-w-[140px] shrink-0 truncate rounded-md px-1.5 py-0.5 ${
+              className={`max-w-[200px] shrink-0 truncate rounded-md px-1.5 py-0.5 ${
                 i === trail.length - 1
                   ? "font-medium text-foreground"
                   : "text-muted-foreground hover:text-foreground"
@@ -1332,7 +1373,7 @@ function RelationBlock({
       const src = cap ? resp.rows.slice(0, cap) : resp.rows
       return src.map((r) => {
         const pk = String(r[pkCol])
-        return { pk, label: r["name"] ? String(r["name"]) : pk, row: r }
+        return { pk, label: objectLabel(r, pk), row: r }
       })
     },
     []
