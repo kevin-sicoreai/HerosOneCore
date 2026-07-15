@@ -73,7 +73,14 @@ services/<name>/
 ```bash
 cd apps/web
 npm install
-npm run dev        # http://localhost:3000
+npm run dev        # http://localhost:3000 (bare local defaults: services on 127.0.0.1:80xx)
+```
+
+To run against a config profile (dev/prod service URLs from `config/<profile>.env`):
+
+```bash
+APP_ENV=dev  ./scripts/services/start_web.sh   # next dev
+APP_ENV=prod ./scripts/services/start_web.sh   # next build + next start
 ```
 
 ## Git
